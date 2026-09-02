@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Akreditasi RAG — MTI 2026</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+</head>
+<body>
+  <div class="layout">
+
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <h1>Akreditasi RAG</h1>
+        <p class="subtitle">Magister Teknik Informatika &middot; LAM INFOKOM 2026</p>
+      </header>
+
+      <section class="panel">
+        <h2>Percakapan</h2>
+        <div class="button-row">
+          <button class="button primary" id="button-new-session">+ Percakapan Baru</button>
+        </div>
+        <div class="session-list" id="session-list">
+          <p class="session-empty">Belum ada percakapan tersimpan.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Sumber Dokumen</h2>
+        <div class="source-path" id="source-path">memuat…</div>
+        <div class="readonly-badge" title="Sistem ini tidak pernah menulis ke direktori sumber">
+          <span class="lock-icon">🔒</span> Akses baca-saja
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Status Indeks</h2>
+        <div class="stat-grid">
+          <div class="stat"><span class="stat-value" id="stat-documents">–</span><span class="stat-label">Dokumen</span></div>
+          <div class="stat"><span class="stat-value" id="stat-chunks">–</span><span class="stat-label">Potongan</span></div>
+          <div class="stat"><span class="stat-value" id="stat-megabytes">–</span><span class="stat-label">MB</span></div>
+          <div class="stat"><span class="stat-value" id="stat-failed">–</span><span class="stat-label">Gagal</span></div>
+        </div>
+        <div class="muted-line" id="stat-last-indexed">Belum pernah diindeks</div>
+        <div class="muted-line warning-line hidden" id="stat-scanned"></div>
+
+        <div class="button-row">
+          <button class="button primary" id="button-ingest">Perbarui Indeks</button>
+          <button class="button ghost" id="button-rebuild" title="Hapus indeks dan baca ulang seluruh dokumen">Bangun Ulang</button>
+        </div>
+
+        <div class="progress-block hidden" id="ingest-progress">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="progress-caption" id="progress-caption"></div>
+          <div class="progress-detail" id="progress-detail"></div>
+          <details class="progress-log">
+            <summary>Log proses</summary>
+            <pre id="progress-log-text"></pre>
+          </details>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Model Bahasa</h2>
+        <label class="field-label" for="select-backend">Backend</label>
+        <select id="select-backend" class="select"></select>
+        <div class="backend-status" id="backend-status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Pencarian</h2>
+        <label class="field-label" for="select-folder">Batasi ke folder</label>
+        <select id="select-folder" class="select">
+          <option value="">Semua folder</option>
+        </select>
+
+        <label class="field-label" for="input-passages">
+          Jumlah sumber: <strong id="passage-count-label">6</strong>
+        </label>
+        <input type="range" id="input-passages" class="slider" min="3" max="15" value="6">
+      </section>
+
+      <section class="panel">
+        <h2>Perangkat</h2>
+        <div class="muted-line" id="hardware-line">–</div>
+        <div class="muted-line" id="embedding-line">–</div>
+        <div class="muted-line" id="reranker-line">–</div>
+        <div class="muted-line" id="ocr-line">–</div>
+        <div class="muted-line" id="client-line">–</div>
+      </section>
+    </aside>
+
+    <!-- ============================= MAIN ============================= -->
+    <main class="main">
+      <nav class="tabs">
+        <button class="tab active" data-tab="ask">Tanya Jawab</button>
+        <button class="tab" data-tab="browse">Telusuri Potongan</button>
+        <button class="tab" data-tab="documents">Daftar Dokumen</button>
+      </nav>
+
+      <!-- ---------------------------- ASK ---------------------------- -->
+      <section class="tab-panel active" id="panel-ask">
+        <div class="conversation-toolbar hidden" id="conversation-toolbar">
+          <span class="toolbar-label">Panel sumber</span>
+          <button class="toolbar-button" id="button-expand-sources">Buka semua</button>
+          <button class="toolbar-button" id="button-collapse-sources">Tutup semua</button>
+        </div>
+        <div class="conversation" id="conversation">
+          <div class="welcome">
+            <h2>Tanyakan apa saja tentang dokumen akreditasi</h2>
+            <p>Jawaban selalu disertai sitasi ke dokumen sumber. Sistem hanya membaca berkas; tidak ada yang diubah di Google Drive.</p>
+            <div class="example-questions" id="example-questions">
+              <button class="example">Berapa rata-rata beban EWMP DTPR pada TS?</button>
+              <button class="example">Apa saja kriteria pada instrumen akreditasi LAM INFOKOM untuk program magister?</button>
+              <button class="example">Sebutkan publikasi penelitian dosen beserta tahunnya.</button>
+              <button class="example">Bagaimana prosedur baku proses akreditasi?</button>
+            </div>
+          </div>
+        </div>
+
+        <form class="composer" id="composer">
+          <textarea id="input-question" class="composer-input" rows="1"
+                    placeholder="Tulis pertanyaan… (Enter untuk kirim, Shift+Enter baris baru)"></textarea>
+          <button type="submit" class="button primary send" id="button-send">Kirim</button>
+          <button type="button" class="button ghost hidden" id="button-stop">Hentikan</button>
+        </form>
+      </section>
+
+      <!-- --------------------------- BROWSE -------------------------- -->
+      <section class="tab-panel" id="panel-browse">
+        <form class="browse-form" id="browse-form">
+          <input type="text" id="input-browse" class="text-input"
+                 placeholder="Cari potongan dokumen tanpa membuat jawaban…">
+          <button type="submit" class="button primary">Cari</button>
+        </form>
+        <div class="passage-list" id="browse-results">
+          <p class="empty-hint">Masukkan kata kunci untuk melihat potongan dokumen yang paling relevan, lengkap dengan skor pencarian semantik dan kata kunci.</p>
+        </div>
+      </section>
+
+      <!-- ------------------------- DOCUMENTS ------------------------- -->
+      <section class="tab-panel" id="panel-documents">
+        <div class="document-toolbar">
+          <input type="text" id="input-document-filter" class="text-input" placeholder="Saring berdasarkan nama atau folder…">
+          <select id="select-document-status" class="select compact">
+            <option value="">Semua status</option>
+            <option value="indexed">Terindeks</option>
+            <option value="empty">Kosong / hasil pindai</option>
+            <option value="failed">Gagal dibaca</option>
+          </select>
+          <button class="button ghost" id="button-refresh-documents">Muat Ulang</button>
+        </div>
+        <div class="document-table-wrapper">
+          <table class="document-table">
+            <thead>
+              <tr>
+                <th>Dokumen</th><th>Folder</th><th>Status</th>
+                <th class="numeric">Ukuran</th>
+                <th class="numeric">Potongan</th><th class="numeric">Bagian</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="document-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <!-- Markdown rendering for answers. Vendored locally rather than loaded from
+       a CDN so the interface keeps working without internet access. -->
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

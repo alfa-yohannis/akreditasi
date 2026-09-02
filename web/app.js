@@ -1,0 +1,1714 @@
+/* ==========================================================================
+   Akreditasi RAG — browser client
+   ==========================================================================
+   Organised as small classes, each owning one region of the interface:
+
+     ApiClient              HTTP access, the only place fetch() is called
+     ServerSentEventReader  turns a streaming response into typed events
+     Toast                  transient notifications
+     StatusPanel            sidebar system status
+     IngestPanel            index-building controls and progress polling
+     ConversationView       question/answer thread
+     AnswerRenderer         one streaming answer and its citation cards
+     BrowsePanel            retrieval-only passage search
+     DocumentsPanel         indexed document table
+     TabController          top-level navigation
+     Application            composes the above and wires global events
+
+   The interface is written in Indonesian to match the corpus and its readers.
+   ========================================================================== */
+
+'use strict';
+
+/* -------------------------------------------------------------- utilities */
+
+/** Escapes text for safe insertion into innerHTML. */
+class HtmlEscaper {
+  /** Returns `value` with HTML-significant characters replaced by entities. */
+  escape(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+}
+
+/** Formats numbers and durations the way the sidebar displays them. */
+class ValueFormatter {
+  /** Groups thousands using Indonesian conventions. */
+  count(value) {
+    return Number(value ?? 0).toLocaleString('id-ID');
+  }
+
+  /** Renders a duration in seconds as a compact "1m 24s" style string. */
+  duration(seconds) {
+    const total = Math.round(Number(seconds ?? 0));
+    if (total < 60) return `${total}s`;
+    const minutes = Math.floor(total / 60);
+    return `${minutes}m ${total % 60}s`;
+  }
+
+  /** Renders a byte count as KB, MB or GB with one decimal place. */
+  fileSize(bytes) {
+    const value = Number(bytes ?? 0);
+    if (value <= 0) return '–';
+    const units = [
+      { limit: 1024 ** 3, suffix: 'GB' },
+      { limit: 1024 ** 2, suffix: 'MB' },
+      { limit: 1024, suffix: 'KB' },
+    ];
+    for (const unit of units) {
+      if (value >= unit.limit) {
+        return `${(value / unit.limit).toLocaleString('id-ID', { maximumFractionDigits: 1 })} ${unit.suffix}`;
+      }
+    }
+    return `${value} B`;
+  }
+
+  /** Renders an ISO timestamp as a readable local date and time. */
+  timestamp(isoText) {
+    if (!isoText) return 'belum pernah';
+    const parsed = new Date(isoText);
+    if (Number.isNaN(parsed.getTime())) return isoText;
+    return parsed.toLocaleString('id-ID', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  }
+}
+
+/* --------------------------------------------------------------- markdown */
+
+/**
+ * Renders the Markdown that language models produce into safe HTML.
+ *
+ * Parsing is done by `marked` and sanitising by `DOMPurify`, both vendored
+ * under `web/vendor/` rather than loaded from a CDN so the interface keeps
+ * working on a machine with no internet access.
+ *
+ * Scope: this applies **only** to the generated answer. Document excerpts on
+ * citation cards and in the passage browser are inserted as escaped literal
+ * text, so the contents of a source file are never reinterpreted as markup.
+ */
+class MarkdownRenderer {
+  constructor() {
+    this.escaper = new HtmlEscaper();
+    this.isLibraryAvailable =
+      typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined';
+    if (this.isLibraryAvailable) {
+      // GitHub-flavoured Markdown gives tables; `breaks` matches how models
+      // write, treating a single newline as a line break rather than a join.
+      marked.setOptions({ gfm: true, breaks: true });
+    }
+  }
+
+  /** Returns `markdownText` as sanitised HTML ready for innerHTML. */
+  render(markdownText) {
+    const source = markdownText ?? '';
+    if (!this.isLibraryAvailable) {
+      // Degrade to escaped plain text rather than showing raw markup.
+      return `<p>${this.escaper.escape(source)}</p>`;
+    }
+    // Sanitising is belt-and-braces: the text comes from a language model, and
+    // a model quoting a document could reproduce a script tag verbatim.
+    return DOMPurify.sanitize(marked.parse(source), { ADD_ATTR: ['target', 'rel'] });
+  }
+}
+
+/**
+ * Turns "[n]" references in a rendered answer into clickable citation chips.
+ *
+ * Works on the DOM after rendering rather than on the HTML string, so a "[1]"
+ * appearing inside a code block, a link label or an attribute is left alone —
+ * only genuine body text is rewritten.
+ */
+class CitationLinker {
+  /** Elements whose text must never be rewritten into citation chips. */
+  static PROTECTED_SELECTOR = 'code, pre, a';
+
+  /** Replaces every "[n]" in `rootElement` with a chip bound to `onClick`. */
+  apply(rootElement, onClick) {
+    const walker = document.createTreeWalker(rootElement, NodeFilter.SHOW_TEXT);
+    const candidates = [];
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const parent = node.parentElement;
+      if (!parent || parent.closest(CitationLinker.PROTECTED_SELECTOR)) continue;
+      if (/\[\d{1,2}\]/.test(node.nodeValue)) candidates.push(node);
+    }
+
+    // Collected first, then replaced: mutating during the walk invalidates it.
+    for (const node of candidates) {
+      this.#replaceTextNode(node, onClick);
+    }
+  }
+
+  /** Splits one text node into plain text and citation-chip elements. */
+  #replaceTextNode(node, onClick) {
+    const fragment = document.createDocumentFragment();
+    for (const part of node.nodeValue.split(/(\[\d{1,2}\])/)) {
+      if (!part) continue;
+      const citationMatch = part.match(/^\[(\d{1,2})\]$/);
+      if (citationMatch) {
+        fragment.appendChild(this.#buildChip(citationMatch[1], onClick));
+      } else {
+        fragment.appendChild(document.createTextNode(part));
+      }
+    }
+    node.parentNode.replaceChild(fragment, node);
+  }
+
+  /** Builds one citation chip element. */
+  #buildChip(citationNumber, onClick) {
+    const chip = document.createElement('span');
+    chip.className = 'citation-marker';
+    chip.dataset.citation = citationNumber;
+    chip.textContent = citationNumber;
+    chip.addEventListener('click', onClick);
+    return chip;
+  }
+}
+
+/* ------------------------------------------------------------------- http */
+
+/** Every HTTP call the interface makes. */
+class ApiClient {
+  /** Reads the system status, index statistics and backend availability. */
+  async fetchStatus() {
+    return this.#readJson(await fetch('/api/status'));
+  }
+
+  /** Lists top-level folders usable as retrieval filters. */
+  async fetchFolders() {
+    return this.#readJson(await fetch('/api/folders'));
+  }
+
+  /** Lists indexed documents, optionally filtered by ingest status. */
+  async fetchDocuments(statusFilter) {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return this.#readJson(await fetch(`/api/documents${query}`));
+  }
+
+  /** Starts a background indexing run. */
+  async startIngest(forceFullRebuild) {
+    const response = await fetch('/api/ingest/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force_full_rebuild: forceFullRebuild }),
+    });
+    if (response.status === 409) return { started: false, message: 'Proses indexing sedang berjalan.' };
+    return this.#readJson(response);
+  }
+
+  /** Polls progress of the current or most recent indexing run. */
+  async fetchIngestStatus() {
+    return this.#readJson(await fetch('/api/ingest/status'));
+  }
+
+  /** Retrieves passages without generating an answer. */
+  async search(payload) {
+    const response = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return this.#readJson(response);
+  }
+
+  /** Opens the streaming answer channel; returns the raw Response. */
+  async openAnswerStream(payload, abortSignal) {
+    const response = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: abortSignal,
+    });
+    if (!response.ok) {
+      throw new Error(`Server menolak permintaan (HTTP ${response.status})`);
+    }
+    return response;
+  }
+
+  /** Lists saved conversations, most recently used first. */
+  async fetchSessions() {
+    return this.#readJson(await fetch('/api/sessions'));
+  }
+
+  /** Loads one conversation together with all of its turns. */
+  async fetchSession(sessionId) {
+    return this.#readJson(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`));
+  }
+
+  /** Starts a new conversation. */
+  async createSession(title) {
+    const response = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title ?? null }),
+    });
+    return this.#readJson(response);
+  }
+
+  /** Renames a conversation. */
+  async renameSession(sessionId, title) {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    return this.#readJson(response);
+  }
+
+  /** Deletes a conversation and every turn in it. */
+  async deleteSession(sessionId) {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
+    return this.#readJson(response);
+  }
+
+  /** Asks the server to reveal or open a document on this machine. */
+  async runFileAction(documentId, action) {
+    const response = await fetch('/api/file-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ document_id: documentId, action }),
+    });
+    return this.#readJson(response);
+  }
+
+  /** Parses a JSON response, raising the server's detail message on failure. */
+  async #readJson(response) {
+    const parsed = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(parsed.detail || parsed.message || `HTTP ${response.status}`);
+    }
+    return parsed;
+  }
+}
+
+/** Decodes a Server-Sent Events body into `{name, payload}` objects. */
+class ServerSentEventReader {
+  /**
+   * Reads `response` to completion, invoking `handler` per event.
+   * Frames are separated by a blank line; partial frames are buffered until
+   * the terminating newline pair arrives.
+   */
+  async readAll(response, handler) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let separatorIndex = buffer.indexOf('\n\n');
+      while (separatorIndex !== -1) {
+        const frame = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        const event = this.#parseFrame(frame);
+        if (event) handler(event);
+        separatorIndex = buffer.indexOf('\n\n');
+      }
+    }
+  }
+
+  /** Turns one raw frame into a typed event, or null when unparsable. */
+  #parseFrame(frame) {
+    let eventName = 'message';
+    const dataLines = [];
+
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim();
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    }
+    if (dataLines.length === 0) return null;
+
+    try {
+      return { name: eventName, payload: JSON.parse(dataLines.join('\n')) };
+    } catch {
+      return null;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ toast */
+
+/** Shows brief messages at the bottom of the window. */
+class Toast {
+  constructor(element) {
+    this.element = element;
+    this.hideTimer = null;
+  }
+
+  /** Displays `message` for a few seconds. */
+  show(message) {
+    this.element.textContent = message;
+    this.element.classList.remove('hidden');
+    if (this.hideTimer) clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(this.hide.bind(this), 4200);
+  }
+
+  /** Hides the toast immediately. */
+  hide() {
+    this.element.classList.add('hidden');
+  }
+}
+
+/* ------------------------------------------------------------- clipboard */
+
+/**
+ * Copies text to the clipboard, with a fallback for non-secure origins.
+ *
+ * `navigator.clipboard` is unavailable over plain HTTP unless the origin is
+ * localhost — and this app is reached over the LAN by IP, which is exactly that
+ * case. The `execCommand` fallback is deprecated but remains the only thing
+ * that works there, so both paths are kept.
+ */
+class ClipboardWriter {
+  /** Copies `text`, returning true when it reached the clipboard. */
+  async copy(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fall through to the legacy path rather than failing outright.
+      }
+    }
+    return this.#copyViaHiddenTextarea(text);
+  }
+
+  /** Legacy copy path: select text in an off-screen textarea and execute copy. */
+  #copyViaHiddenTextarea(text) {
+    const holder = document.createElement('textarea');
+    holder.value = text;
+    holder.setAttribute('readonly', '');
+    holder.style.position = 'fixed';
+    holder.style.top = '-1000px';
+    holder.style.opacity = '0';
+    document.body.appendChild(holder);
+    holder.select();
+
+    let succeeded = false;
+    try {
+      succeeded = document.execCommand('copy');
+    } catch {
+      succeeded = false;
+    }
+    document.body.removeChild(holder);
+    return succeeded;
+  }
+}
+
+/* --------------------------------------------------------- session panel */
+
+/**
+ * Lists saved conversations and drives creating, opening and deleting them.
+ *
+ * The panel owns no conversation state itself; selecting a session raises a
+ * callback and the conversation view decides what to load, which keeps the two
+ * from having to agree on message formats.
+ */
+class SessionPanel {
+  constructor(apiClient, formatter, toast, onSessionOpened) {
+    this.api = apiClient;
+    this.formatter = formatter;
+    this.toast = toast;
+    this.onSessionOpened = onSessionOpened;
+    this.escaper = new HtmlEscaper();
+    this.sessions = [];
+    this.activeSessionId = null;
+    this.listElement = document.getElementById('session-list');
+
+    document.getElementById('button-new-session')
+      .addEventListener('click', this.handleNewSession.bind(this));
+  }
+
+  /** Reloads the session list and repaints it. */
+  async refresh() {
+    try {
+      const result = await this.api.fetchSessions();
+      this.sessions = result.sessions || [];
+      this.render();
+    } catch (error) {
+      this.toast.show(`Gagal memuat percakapan: ${error.message}`);
+    }
+  }
+
+  /** Marks which session is currently open, without refetching. */
+  setActiveSession(sessionId) {
+    this.activeSessionId = sessionId;
+    this.render();
+  }
+
+  /** Paints the session list. */
+  render() {
+    if (this.sessions.length === 0) {
+      this.listElement.innerHTML = '<p class="session-empty">Belum ada percakapan tersimpan.</p>';
+      return;
+    }
+    this.listElement.innerHTML = this.sessions.map(this.#renderRow.bind(this)).join('');
+    for (const row of this.listElement.querySelectorAll('.session-open')) {
+      row.addEventListener('click', this.handleOpen.bind(this));
+    }
+    for (const button of this.listElement.querySelectorAll('.session-delete')) {
+      button.addEventListener('click', this.handleDelete.bind(this));
+    }
+    for (const button of this.listElement.querySelectorAll('.session-rename')) {
+      button.addEventListener('click', this.handleRename.bind(this));
+    }
+  }
+
+  /** Renders one session row. */
+  #renderRow(session) {
+    const isActive = session.session_id === this.activeSessionId;
+    const exchanges = Math.ceil((session.turn_count || 0) / 2);
+    return `
+      <div class="session-row ${isActive ? 'active' : ''}">
+        <button class="session-open" data-session-id="${this.escaper.escape(session.session_id)}"
+                title="${this.escaper.escape(session.title)}">
+          <span class="session-title">${this.escaper.escape(session.title)}</span>
+          <span class="session-meta">${exchanges} tanya · ${this.formatter.timestamp(session.updated_at)}</span>
+        </button>
+        <div class="session-actions">
+          <button class="session-rename" data-session-id="${this.escaper.escape(session.session_id)}"
+                  title="Ganti nama">✎</button>
+          <button class="session-delete" data-session-id="${this.escaper.escape(session.session_id)}"
+                  title="Hapus percakapan">✕</button>
+        </div>
+      </div>`;
+  }
+
+  /** Creates a fresh conversation and opens it. */
+  async handleNewSession() {
+    try {
+      const session = await this.api.createSession(null);
+      await this.refresh();
+      this.setActiveSession(session.session_id);
+      if (this.onSessionOpened) this.onSessionOpened(session.session_id, true);
+    } catch (error) {
+      this.toast.show(`Gagal membuat percakapan: ${error.message}`);
+    }
+  }
+
+  /** Opens the clicked session. */
+  handleOpen(clickEvent) {
+    const sessionId = clickEvent.currentTarget.dataset.sessionId;
+    this.setActiveSession(sessionId);
+    if (this.onSessionOpened) this.onSessionOpened(sessionId, false);
+  }
+
+  /** Renames the clicked session after prompting for a new title. */
+  async handleRename(clickEvent) {
+    clickEvent.stopPropagation();
+    const sessionId = clickEvent.currentTarget.dataset.sessionId;
+    const current = this.sessions.find((s) => s.session_id === sessionId);
+    const title = window.prompt('Nama percakapan:', current ? current.title : '');
+    if (!title) return;
+    try {
+      await this.api.renameSession(sessionId, title);
+      await this.refresh();
+    } catch (error) {
+      this.toast.show(`Gagal mengganti nama: ${error.message}`);
+    }
+  }
+
+  /** Deletes the clicked session after confirmation. */
+  async handleDelete(clickEvent) {
+    clickEvent.stopPropagation();
+    const sessionId = clickEvent.currentTarget.dataset.sessionId;
+    const session = this.sessions.find((s) => s.session_id === sessionId);
+    const label = session ? session.title : 'percakapan ini';
+    if (!window.confirm(`Hapus "${label}"?\n\nSeluruh pertanyaan dan jawaban di dalamnya akan hilang. Dokumen sumber tidak terpengaruh.`)) {
+      return;
+    }
+    try {
+      await this.api.deleteSession(sessionId);
+      this.toast.show('Percakapan dihapus.');
+      const wasActive = sessionId === this.activeSessionId;
+      await this.refresh();
+      if (wasActive) {
+        this.activeSessionId = null;
+        if (this.onSessionOpened) this.onSessionOpened(null, true);
+      }
+    } catch (error) {
+      this.toast.show(`Gagal menghapus: ${error.message}`);
+    }
+  }
+}
+
+/* ----------------------------------------------------------- status panel */
+
+/** Renders the sidebar's system status and keeps the backend list current. */
+class StatusPanel {
+  constructor(apiClient, formatter, toast) {
+    this.api = apiClient;
+    this.formatter = formatter;
+    this.toast = toast;
+    this.backendStatusesByName = new Map();
+  }
+
+  /** Fetches status and repaints every sidebar field. */
+  async refresh() {
+    let status;
+    try {
+      status = await this.api.fetchStatus();
+    } catch (error) {
+      this.toast.show(`Gagal memuat status: ${error.message}`);
+      return null;
+    }
+
+    this.#renderSource(status.source);
+    this.#renderIndex(status.index);
+    this.#renderModels(status);
+    this.#renderBackends(status.language_models);
+    this.#renderClientScope(status.client);
+    return status;
+  }
+
+  /** Publishes whether reveal/open are usable, and says so in the sidebar. */
+  #renderClientScope(client) {
+    const isLocal = Boolean(client && client.is_local);
+    AnswerRenderer.isLocalClient = isLocal;
+
+    const line = document.getElementById('client-line');
+    if (!line) return;
+    line.textContent = isLocal
+      ? 'Akses: komputer ini — dokumen dapat diunduh atau dibuka langsung'
+      : `Akses: jaringan (${client ? client.address : '?'}) — dokumen tersedia lewat Unduh`;
+  }
+
+  /** Paints the corpus location and read-only assurance. */
+  #renderSource(source) {
+    const pathElement = document.getElementById('source-path');
+    pathElement.textContent = source.directory;
+    if (!source.exists) {
+      pathElement.textContent += '  ⚠ tidak ditemukan';
+    }
+  }
+
+  /** Paints document, chunk, size and failure counters. */
+  #renderIndex(index) {
+    document.getElementById('stat-documents').textContent = this.formatter.count(index.document_count);
+    document.getElementById('stat-chunks').textContent = this.formatter.count(index.chunk_count);
+    document.getElementById('stat-megabytes').textContent = this.formatter.count(index.total_megabytes);
+    document.getElementById('stat-failed').textContent = this.formatter.count(index.failed_count);
+    document.getElementById('stat-last-indexed').textContent =
+      `Terakhir diindeks: ${this.formatter.timestamp(index.last_indexed_at)}`;
+
+    const scannedLine = document.getElementById('stat-scanned');
+    if (index.scanned_section_count > 0) {
+      scannedLine.textContent =
+        `${this.formatter.count(index.scanned_section_count)} halaman terindikasi hasil pindai ` +
+        `tanpa lapisan teks — aktifkan OCR agar terbaca.`;
+      scannedLine.classList.remove('hidden');
+    } else {
+      scannedLine.classList.add('hidden');
+    }
+  }
+
+  /** Paints the hardware, embedding, reranking and OCR lines. */
+  #renderModels(status) {
+    document.getElementById('hardware-line').textContent = `Akselerator: ${status.hardware.accelerator}`;
+    document.getElementById('embedding-line').textContent =
+      `Embedding: ${status.models.embedding_model} (${status.models.embedding_device})`;
+
+    const rerankerLine = document.getElementById('reranker-line');
+    rerankerLine.textContent = status.models.reranking_enabled
+      ? `Reranker: ${status.models.reranking_model}`
+      : 'Reranker: nonaktif';
+
+    const ocrLine = document.getElementById('ocr-line');
+    ocrLine.textContent = status.ocr.available
+      ? 'OCR: aktif'
+      : `OCR: ${status.ocr.reason || 'nonaktif'}`;
+  }
+
+  /** Rebuilds the backend dropdown, marking unavailable backends. */
+  #renderBackends(languageModels) {
+    const select = document.getElementById('select-backend');
+    const previousChoice = select.value || languageModels.active_backend;
+    this.backendStatusesByName.clear();
+    select.innerHTML = '';
+
+    for (const backend of languageModels.backends) {
+      this.backendStatusesByName.set(backend.backend_name, backend);
+      const option = document.createElement('option');
+      option.value = backend.backend_name;
+      // The model and its reasoning depth belong on the option itself: they are
+      // the whole basis for choosing between backends, and putting them only in
+      // the detail line below means they are read after the choice, not before.
+      const readiness = backend.is_available ? '' : '  (tidak siap)';
+      const effort = backend.effort ? ` · effort ${backend.effort}` : '';
+      option.textContent =
+        `${this.#backendLabel(backend.backend_name)} — ${backend.model_name}${effort}${readiness}`;
+      select.appendChild(option);
+    }
+
+    select.value = this.backendStatusesByName.has(previousChoice)
+      ? previousChoice
+      : languageModels.active_backend;
+    this.renderSelectedBackendDetail();
+  }
+
+  /** Friendly display name for a backend identifier. */
+  #backendLabel(backendName) {
+    // Kept short: the model name and effort are appended after these, and the
+    // sidebar dropdown is only so wide.
+    const labels = {
+      ollama: 'Ollama (lokal)',
+      claude_cli: 'Claude Code',
+      codex_cli: 'Codex',
+      antigravity_cli: 'Antigravity',
+    };
+    return labels[backendName] || backendName;
+  }
+
+  /** Paints the availability line beneath the backend dropdown. */
+  renderSelectedBackendDetail() {
+    const select = document.getElementById('select-backend');
+    const detailElement = document.getElementById('backend-status');
+    const backend = this.backendStatusesByName.get(select.value);
+
+    if (!backend) {
+      detailElement.textContent = '';
+      return;
+    }
+    const indicatorClass = backend.is_available ? 'online' : 'offline';
+    const escaper = new HtmlEscaper();
+    // Sending internal accreditation excerpts off-machine is a decision the
+    // operator should make knowingly, so it is stated on the control itself.
+    const privacyNote = backend.runs_locally
+      ? '<span class="privacy-note local">Dokumen tidak meninggalkan komputer ini</span>'
+      : '<span class="privacy-note remote">Kutipan dokumen dikirim ke penyedia layanan</span>';
+
+    // Reasoning depth is shown as its own badge: it is the setting most likely
+    // to be changed, and the one whose cost the operator should see.
+    const effortBadge = backend.effort
+      ? `<span class="effort-badge">effort ${escaper.escape(backend.effort)}</span>`
+      : '';
+
+    detailElement.innerHTML =
+      `<span class="indicator ${indicatorClass}"></span>` +
+      `<strong>${escaper.escape(backend.model_name)}</strong>` +
+      effortBadge +
+      `<br><span class="backend-detail">${escaper.escape(backend.detail)}</span><br>` +
+      privacyNote;
+  }
+}
+
+/* ----------------------------------------------------------- ingest panel */
+
+/** Drives index building and mirrors its progress into the sidebar. */
+class IngestPanel {
+  /** Milliseconds between progress polls while a run is active. */
+  static POLL_INTERVAL_MILLISECONDS = 1200;
+
+  constructor(apiClient, formatter, toast, onRunFinished) {
+    this.api = apiClient;
+    this.formatter = formatter;
+    this.toast = toast;
+    this.onRunFinished = onRunFinished;
+    this.pollTimer = null;
+
+    document.getElementById('button-ingest')
+      .addEventListener('click', this.handleIncrementalIngest.bind(this));
+    document.getElementById('button-rebuild')
+      .addEventListener('click', this.handleFullRebuild.bind(this));
+  }
+
+  /** Starts an incremental run that only re-reads changed documents. */
+  async handleIncrementalIngest() {
+    await this.#start(false);
+  }
+
+  /** Starts a full rebuild after confirming, since it discards the index. */
+  async handleFullRebuild() {
+    const confirmed = window.confirm(
+      'Bangun ulang indeks dari nol?\n\n' +
+      'Seluruh indeks akan dihapus dan semua dokumen dibaca ulang. ' +
+      'Dokumen sumber di Google Drive TIDAK akan diubah.'
+    );
+    if (confirmed) await this.#start(true);
+  }
+
+  /** Requests a run and begins polling for progress. */
+  async #start(forceFullRebuild) {
+    this.#setButtonsEnabled(false);
+    try {
+      const result = await this.api.startIngest(forceFullRebuild);
+      this.toast.show(result.message || 'Proses indexing dimulai.');
+    } catch (error) {
+      this.toast.show(`Gagal memulai indexing: ${error.message}`);
+      this.#setButtonsEnabled(true);
+      return;
+    }
+    document.getElementById('ingest-progress').classList.remove('hidden');
+    this.#scheduleNextPoll();
+  }
+
+  /** Resumes polling on page load if a run is already in flight. */
+  async resumeIfRunning() {
+    try {
+      const progress = await this.api.fetchIngestStatus();
+      if (progress.is_running) {
+        document.getElementById('ingest-progress').classList.remove('hidden');
+        this.#setButtonsEnabled(false);
+        this.#scheduleNextPoll();
+      }
+    } catch {
+      /* Status is unavailable before the first run; nothing to resume. */
+    }
+  }
+
+  /** Queues the next poll tick. */
+  #scheduleNextPoll() {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = setTimeout(this.#poll.bind(this), IngestPanel.POLL_INTERVAL_MILLISECONDS);
+  }
+
+  /** Reads progress once and either repaints or finishes the run. */
+  async #poll() {
+    let progress;
+    try {
+      progress = await this.api.fetchIngestStatus();
+    } catch {
+      this.#scheduleNextPoll();
+      return;
+    }
+
+    this.#render(progress);
+    if (progress.is_running) {
+      this.#scheduleNextPoll();
+      return;
+    }
+
+    this.#setButtonsEnabled(true);
+    if (progress.error_message) {
+      this.toast.show(`Indexing gagal: ${progress.error_message}`);
+    } else if (progress.phase === 'completed') {
+      this.toast.show(
+        `Indexing selesai dalam ${this.formatter.duration(progress.elapsed_seconds)} — ` +
+        `${this.formatter.count(progress.documents_indexed)} dokumen diindeks.`
+      );
+    }
+    if (this.onRunFinished) this.onRunFinished();
+  }
+
+  /** Paints the progress bar, counters and run log. */
+  #render(progress) {
+    const total = Math.max(1, progress.documents_total);
+    const percentage = Math.min(100, Math.round((progress.documents_processed / total) * 100));
+
+    document.getElementById('progress-fill').style.width = `${percentage}%`;
+    document.getElementById('progress-caption').textContent =
+      `${this.#phaseLabel(progress.phase)} — ${percentage}%`;
+    document.getElementById('progress-detail').textContent =
+      `${this.formatter.count(progress.documents_processed)}/${this.formatter.count(progress.documents_total)} berkas · ` +
+      `${this.formatter.count(progress.documents_indexed)} diindeks · ` +
+      `${this.formatter.count(progress.documents_skipped)} dilewati · ` +
+      `${this.formatter.count(progress.documents_failed)} gagal · ` +
+      `${this.formatter.count(progress.chunks_created)} potongan · ` +
+      `${this.formatter.duration(progress.elapsed_seconds)}`;
+
+    const logElement = document.getElementById('progress-log-text');
+    const combinedLog = (progress.recent_messages || []).join('\n');
+    if (logElement.textContent !== combinedLog) {
+      logElement.textContent = combinedLog;
+      logElement.scrollTop = logElement.scrollHeight;
+    }
+
+    const currentDocument = progress.current_document;
+    if (currentDocument) {
+      document.getElementById('progress-caption').textContent =
+        `${this.#phaseLabel(progress.phase)} — ${percentage}% · ${currentDocument}`;
+    }
+  }
+
+  /** Translates a pipeline phase identifier into a readable label. */
+  #phaseLabel(phase) {
+    const labels = {
+      idle: 'Menunggu',
+      starting: 'Memulai',
+      scanning: 'Memindai berkas',
+      indexing: 'Membaca & mengindeks',
+      saving: 'Menyimpan indeks',
+      completed: 'Selesai',
+      failed: 'Gagal',
+    };
+    return labels[phase] || phase;
+  }
+
+  /** Enables or disables both ingest buttons together. */
+  #setButtonsEnabled(enabled) {
+    document.getElementById('button-ingest').disabled = !enabled;
+    document.getElementById('button-rebuild').disabled = !enabled;
+  }
+}
+
+/* -------------------------------------------------------- answer renderer */
+
+/** Renders one streaming answer: status line, text, citations and footer. */
+class AnswerRenderer {
+  /**
+   * Whether the viewer is at the machine running the server.
+   *
+   * Static because every answer card needs it and renderers are created one
+   * per answer; threading it through each constructor would add a parameter to
+   * every call site for a value that is fixed for the whole page.
+   */
+  static isLocalClient = false;
+
+  constructor(containerElement, apiClient, toast, clipboard) {
+    this.container = containerElement;
+    this.api = apiClient;
+    this.toast = toast;
+    this.clipboard = clipboard || new ClipboardWriter();
+    this.citations = [];
+    this.escaper = new HtmlEscaper();
+    this.formatter = new ValueFormatter();
+    this.markdown = new MarkdownRenderer();
+    this.citationLinker = new CitationLinker();
+    this.accumulatedText = '';
+    this.citationCardsByNumber = new Map();
+
+    this.container.innerHTML =
+      '<div class="answer-status" id="answer-status-line">' +
+      '<span class="spinner"></span><span>Mencari dokumen relevan…</span></div>' +
+      '<div class="answer-text"></div>';
+    this.statusElement = this.container.querySelector('.answer-status');
+    this.textElement = this.container.querySelector('.answer-text');
+  }
+
+  /** Routes one stream event to the matching render method. */
+  handleEvent(event) {
+    if (event.name === 'sources') this.renderCitations(event.payload.citations || []);
+    else if (event.name === 'status') this.setStatusMessage(event.payload.message);
+    else if (event.name === 'token') this.appendText(event.payload.text || '');
+    else if (event.name === 'error') this.renderError(event.payload.message);
+    else if (event.name === 'done') this.finish(event.payload);
+  }
+
+  /** Replaces the status line's text while keeping the spinner. */
+  setStatusMessage(message) {
+    const label = this.statusElement.querySelector('span:last-child');
+    if (label) label.textContent = message;
+  }
+
+  /**
+   * Appends streamed text and repaints the answer as rendered Markdown.
+   *
+   * The whole answer is re-rendered on every chunk rather than appended to,
+   * because Markdown is not resumable — a heading, list or table is only
+   * recognisable once its full line has arrived. Answers run to a few kilobytes
+   * at most, so the repeated parse is imperceptible.
+   */
+  appendText(textFragment) {
+    this.accumulatedText += textFragment;
+    this.textElement.innerHTML = this.markdown.render(this.accumulatedText);
+    this.citationLinker.apply(this.textElement, this.handleCitationClick.bind(this));
+  }
+
+  /** Expands the evidence panel, then scrolls to and highlights one card. */
+  handleCitationClick(clickEvent) {
+    const citationNumber = clickEvent.currentTarget.dataset.citation;
+    const card = this.citationCardsByNumber.get(String(citationNumber));
+    if (!card) return;
+
+    // The panel is collapsed by default, and a card inside a closed <details>
+    // has no layout — scrolling to it would silently do nothing.
+    const section = card.closest('details.sources-section');
+    if (section) section.open = true;
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('highlighted');
+    setTimeout(() => card.classList.remove('highlighted'), 1600);
+  }
+
+  /**
+   * Builds the evidence panel beneath the answer, collapsed by default.
+   *
+   * A native `<details>` rather than a scripted toggle: it opens and closes
+   * without JavaScript, is keyboard accessible, and keeps no state that could
+   * drift out of step with the DOM. Collapsed initially because the answer is
+   * what the reader came for — the sources are there to be checked, not read
+   * first — and six cards of excerpt would otherwise bury the next question.
+   */
+  renderCitations(citations) {
+    this.citations = citations;
+    if (citations.length === 0) return;
+
+    const section = document.createElement('details');
+    section.className = 'sources-section';
+
+    const summary = document.createElement('summary');
+    summary.className = 'sources-heading';
+    summary.textContent = `Sumber (${citations.length})`;
+    section.appendChild(summary);
+
+    for (const citation of citations) {
+      const card = this.#buildCitationCard(citation);
+      section.appendChild(card);
+      this.citationCardsByNumber.set(String(citation.citation_number), card);
+    }
+    this.container.appendChild(section);
+  }
+
+  /** Constructs one citation card element. */
+  #buildCitationCard(citation) {
+    const card = document.createElement('div');
+    card.className = 'source-card';
+
+    const badges = citation.retrieval_methods
+      .map((method) => `<span class="badge ${method === 'semantic' ? 'semantic' : 'keyword'}">${method === 'semantic' ? 'semantik' : 'kata kunci'}</span>`)
+      .join('');
+    const ocrBadge = citation.produced_by_ocr ? '<span class="badge ocr">OCR</span>' : '';
+
+    // Where a passage names an external page — a SINTA or Scholar profile —
+    // that live page is what the reader actually wants, not the local copy.
+    const externalLinks = (citation.external_links || [])
+      .map((link) =>
+        `<a class="external-link" href="${this.escaper.escape(link.url)}"
+            target="_blank" rel="noopener noreferrer"
+            title="${this.escaper.escape(link.url)}">${this.escaper.escape(link.label)} ↗</a>`)
+      .join('');
+    const externalRow = externalLinks
+      ? `<div class="source-external">Buka sumber asli: ${externalLinks}</div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="source-card-header">
+        <span class="source-number">${citation.citation_number}</span>
+        <span class="source-name">${this.escaper.escape(citation.document_name)}</span>
+      </div>
+      <div class="source-meta">${this.escaper.escape(citation.relative_path)} · ${this.escaper.escape(citation.section_label)}</div>
+      <div class="badge-row">${badges}${ocrBadge}<span class="badge">skor ${citation.relevance_score}</span></div>
+      ${externalRow}
+      <div class="source-excerpt">${this.escaper.escape(citation.excerpt)}</div>
+      <div class="source-actions">
+        <a class="link-button" download
+           href="/api/documents/${encodeURIComponent(citation.document_id)}/download">Unduh dokumen</a>
+        ${AnswerRenderer.isLocalClient
+          ? '<button class="link-button" data-action="reveal">Tampilkan di folder</button>' +
+            '<button class="link-button" data-action="open">Buka dokumen</button>'
+          : ''}
+        <button class="link-button" data-action="copy-excerpt">Salin kutipan</button>
+        <button class="link-button" data-action="copy-path">Salin lokasi</button>
+      </div>`;
+
+    for (const button of card.querySelectorAll('button.link-button')) {
+      button.dataset.documentId = citation.document_id;
+      button.dataset.relativePath = citation.relative_path;
+      // Assigned as properties so the text needs no HTML escaping.
+      button.dataset.excerpt = citation.excerpt || '';
+      button.dataset.documentName = citation.document_name || '';
+      button.dataset.sectionLabel = citation.section_label || '';
+      button.addEventListener('click', this.handleSourceAction.bind(this));
+    }
+    return card;
+  }
+
+  /** Handles reveal / open / copy actions on a citation card. */
+  async handleSourceAction(clickEvent) {
+    const button = clickEvent.currentTarget;
+    const action = button.dataset.action;
+
+    if (action === 'copy-path') {
+      const copied = await this.clipboard.copy(button.dataset.relativePath || '');
+      this.toast.show(copied ? 'Lokasi berkas disalin.' : 'Gagal menyalin.');
+      return;
+    }
+    if (action === 'copy-excerpt') {
+      // Copied with its provenance attached, so a pasted quotation still says
+      // which document and page it came from.
+      const attributed =
+        `"${button.dataset.excerpt || ''}"\n` +
+        `— ${button.dataset.documentName} (${button.dataset.sectionLabel})\n` +
+        `  ${button.dataset.relativePath}`;
+      const copied = await this.clipboard.copy(attributed);
+      this.toast.show(copied ? 'Kutipan disalin beserta sumbernya.' : 'Gagal menyalin.');
+      return;
+    }
+    try {
+      await this.api.runFileAction(button.dataset.documentId, action);
+    } catch (error) {
+      this.toast.show(`Gagal membuka: ${error.message}`);
+    }
+  }
+
+  /** Shows an error banner without discarding text already streamed. */
+  renderError(message) {
+    const banner = document.createElement('div');
+    banner.className = 'answer-error';
+    banner.textContent = message;
+    this.textElement.insertAdjacentElement('afterend', banner);
+  }
+
+  /** Removes the spinner and writes the timing footer with copy actions. */
+  finish(summary) {
+    if (this.statusElement && this.statusElement.parentNode) this.statusElement.remove();
+    if (!this.accumulatedText.trim()) {
+      this.textElement.textContent = '(Model tidak menghasilkan jawaban.)';
+    }
+
+    const parts = [`${this.formatter.duration(summary.elapsed_seconds)}`];
+    if (summary.passage_count !== undefined) parts.push(`${summary.passage_count} sumber`);
+    if (summary.model_name) {
+      const effort = summary.effort ? ` · effort ${summary.effort}` : '';
+      parts.push(`${summary.backend_name} · ${summary.model_name}${effort}`);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'answer-footer';
+    footer.innerHTML =
+      `<span class="answer-meta">${this.escaper.escape(parts.join(' · '))}</span>` +
+      `<span class="answer-copy-actions">` +
+      `<button class="link-button" data-copy="answer">Salin jawaban</button>` +
+      `<button class="link-button" data-copy="with-sources">Salin + sumber</button>` +
+      `</span>`;
+    for (const button of footer.querySelectorAll('[data-copy]')) {
+      button.addEventListener('click', this.handleCopy.bind(this));
+    }
+
+    const sourcesSection = this.container.querySelector('.sources-section');
+    if (sourcesSection) this.container.insertBefore(footer, sourcesSection);
+    else this.container.appendChild(footer);
+  }
+
+  /** Copies the answer, optionally with its source list, to the clipboard. */
+  async handleCopy(clickEvent) {
+    const mode = clickEvent.currentTarget.dataset.copy;
+    // The raw Markdown is copied rather than the rendered HTML, so the text
+    // pastes usefully into Word, email or another Markdown editor alike.
+    const text = mode === 'with-sources'
+      ? this.buildAnswerWithSources()
+      : this.accumulatedText;
+
+    const copied = await this.clipboard.copy(text);
+    this.toast.show(copied ? 'Disalin ke papan klip.' : 'Gagal menyalin ke papan klip.');
+  }
+
+  /** Returns the answer followed by a numbered list of its sources. */
+  buildAnswerWithSources() {
+    if (this.citations.length === 0) return this.accumulatedText;
+    const lines = this.citations.map((citation) =>
+      `[${citation.citation_number}] ${citation.document_name} — ${citation.section_label}\n` +
+      `    ${citation.relative_path}`);
+    return `${this.accumulatedText}\n\nSumber:\n${lines.join('\n')}`;
+  }
+}
+
+/* ------------------------------------------------------ conversation view */
+
+/** Owns the question/answer thread and the streaming request lifecycle. */
+class ConversationView {
+  constructor(apiClient, toast, settingsReader, clipboard) {
+    this.api = apiClient;
+    this.toast = toast;
+    this.settings = settingsReader;
+    this.clipboard = clipboard || new ClipboardWriter();
+    this.eventReader = new ServerSentEventReader();
+    this.escaper = new HtmlEscaper();
+    this.markdown = new MarkdownRenderer();
+    this.citationLinker = new CitationLinker();
+    this.formatter = new ValueFormatter();
+    this.abortController = null;
+    //: Conversation currently being added to; null means nothing is saved.
+    this.sessionId = null;
+    //: Raised after a turn completes so the sidebar can refresh its list.
+    this.onTurnCompleted = null;
+
+    this.conversationElement = document.getElementById('conversation');
+    this.inputElement = document.getElementById('input-question');
+    this.sendButton = document.getElementById('button-send');
+    this.stopButton = document.getElementById('button-stop');
+
+    this.toolbarElement = document.getElementById('conversation-toolbar');
+    document.getElementById('button-expand-sources')
+      .addEventListener('click', this.handleExpandAllSources.bind(this));
+    document.getElementById('button-collapse-sources')
+      .addEventListener('click', this.handleCollapseAllSources.bind(this));
+
+    document.getElementById('composer')
+      .addEventListener('submit', this.handleSubmit.bind(this));
+    this.inputElement.addEventListener('keydown', this.handleKeyDown.bind(this));
+    this.inputElement.addEventListener('input', this.handleInput.bind(this));
+    this.stopButton.addEventListener('click', this.handleStop.bind(this));
+
+    for (const example of document.querySelectorAll('.example')) {
+      example.addEventListener('click', this.handleExampleClick.bind(this));
+    }
+  }
+
+  /** Fills the composer from an example prompt and submits it. */
+  handleExampleClick(clickEvent) {
+    this.inputElement.value = clickEvent.currentTarget.textContent;
+    this.handleSubmit(new Event('submit'));
+  }
+
+  /** Sends on Enter, inserts a newline on Shift+Enter. */
+  handleKeyDown(keyEvent) {
+    if (keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
+      keyEvent.preventDefault();
+      this.handleSubmit(new Event('submit'));
+    }
+  }
+
+  /** Grows the textarea to fit its content, up to the CSS max height. */
+  handleInput() {
+    this.inputElement.style.height = 'auto';
+    this.inputElement.style.height = `${this.inputElement.scrollHeight}px`;
+  }
+
+  /** Aborts an in-flight answer. */
+  handleStop() {
+    if (this.abortController) this.abortController.abort();
+  }
+
+  /** Opens every source panel in the thread. */
+  handleExpandAllSources() {
+    this.#setAllSourcePanels(true);
+  }
+
+  /** Closes every source panel in the thread. */
+  handleCollapseAllSources() {
+    this.#setAllSourcePanels(false);
+  }
+
+  /** Opens or closes every source panel at once. */
+  #setAllSourcePanels(shouldOpen) {
+    for (const panel of this.conversationElement.querySelectorAll('details.sources-section')) {
+      panel.open = shouldOpen;
+    }
+  }
+
+  /**
+   * Shows the toolbar only once a source panel exists to act on.
+   *
+   * Two buttons that do nothing are worse than no buttons: they invite a click
+   * and teach the reader that the control is broken.
+   */
+  #refreshToolbarVisibility() {
+    const hasPanels =
+      this.conversationElement.querySelector('details.sources-section') !== null;
+    this.toolbarElement.classList.toggle('hidden', !hasPanels);
+  }
+
+  /** Validates input, renders the question, then streams the answer. */
+  async handleSubmit(submitEvent) {
+    if (submitEvent) submitEvent.preventDefault();
+    const question = this.inputElement.value.trim();
+    if (!question || this.abortController) return;
+
+    const welcome = this.conversationElement.querySelector('.welcome');
+    if (welcome) welcome.remove();
+
+    this.inputElement.value = '';
+    this.inputElement.style.height = 'auto';
+    this.#appendQuestion(question);
+
+    const answerContainer = this.#appendAnswerContainer();
+    const renderer = new AnswerRenderer(answerContainer, this.api, this.toast, this.clipboard);
+    this.#setBusy(true);
+
+    // A question asked with no session open starts one, so nothing is lost by
+    // simply beginning to type rather than remembering to click "new".
+    if (!this.sessionId) {
+      try {
+        const created = await this.api.createSession(null);
+        this.sessionId = created.session_id;
+      } catch {
+        // Persistence is a convenience; answering must not depend on it.
+      }
+    }
+
+    this.abortController = new AbortController();
+    try {
+      const response = await this.api.openAnswerStream(
+        {
+          question,
+          folder_filter: this.settings.folderFilter() || null,
+          backend_name: this.settings.backendName() || null,
+          passage_count: this.settings.passageCount(),
+          session_id: this.sessionId,
+        },
+        this.abortController.signal
+      );
+      await this.eventReader.readAll(response, this.#buildEventHandler(renderer));
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        renderer.renderError('Dihentikan oleh pengguna.');
+        renderer.finish({ elapsed_seconds: 0 });
+      } else {
+        renderer.renderError(`Gagal menghubungi server: ${error.message}`);
+        renderer.finish({ elapsed_seconds: 0 });
+      }
+    } finally {
+      this.abortController = null;
+      this.#setBusy(false);
+      this.#scrollToBottom();
+      this.#refreshToolbarVisibility();
+      if (this.onTurnCompleted) this.onTurnCompleted(this.sessionId);
+    }
+  }
+
+  /** Starts an empty conversation, discarding what is on screen. */
+  startNewConversation(sessionId) {
+    this.sessionId = sessionId || null;
+    this.conversationElement.innerHTML =
+      '<div class="welcome"><h2>Percakapan baru</h2>' +
+      '<p>Ajukan pertanyaan; jawaban dan sumbernya akan tersimpan otomatis ' +
+      'sehingga dapat dilanjutkan kapan saja.</p></div>';
+    this.#refreshToolbarVisibility();
+  }
+
+  /** Loads a saved conversation and redraws every stored turn. */
+  async openSession(sessionId) {
+    this.sessionId = sessionId;
+    this.conversationElement.innerHTML = '';
+    let session;
+    try {
+      session = await this.api.fetchSession(sessionId);
+    } catch (error) {
+      this.toast.show(`Gagal memuat percakapan: ${error.message}`);
+      return;
+    }
+
+    for (const turn of session.turns || []) {
+      if (turn.role === 'user') this.#appendQuestion(turn.content);
+      else this.#appendStoredAnswer(turn);
+    }
+    if ((session.turns || []).length === 0) this.startNewConversation(sessionId);
+    this.#refreshToolbarVisibility();
+    this.#scrollToBottom();
+  }
+
+  /** Redraws one stored answer, including its citations and copy actions. */
+  #appendStoredAnswer(turn) {
+    const container = this.#appendAnswerContainer();
+    const renderer = new AnswerRenderer(container, this.api, this.toast, this.clipboard);
+    // Replay through the same renderer the live stream uses, so a restored
+    // answer is indistinguishable from a freshly generated one.
+    renderer.handleEvent({ name: 'sources', payload: { citations: turn.citations || [] } });
+    renderer.handleEvent({ name: 'token', payload: { text: turn.content } });
+    renderer.handleEvent({
+      name: 'done',
+      payload: {
+        elapsed_seconds: turn.elapsed_seconds,
+        passage_count: (turn.citations || []).length,
+        backend_name: turn.backend_name,
+        model_name: turn.model_name,
+      },
+    });
+  }
+
+  /** Returns a handler that forwards events and keeps the view scrolled. */
+  #buildEventHandler(renderer) {
+    const view = this;
+    return function forwardEvent(event) {
+      renderer.handleEvent(event);
+      view.#scrollToBottom();
+    };
+  }
+
+  /** Appends the user's question bubble, with its own copy action. */
+  #appendQuestion(question) {
+    const message = document.createElement('div');
+    message.className = 'message question';
+    message.innerHTML =
+      '<button class="question-copy" title="Salin pertanyaan">Salin</button>' +
+      `<div class="question-bubble">${this.escaper.escape(question)}</div>`;
+
+    const copyButton = message.querySelector('.question-copy');
+    // Assigned as a property rather than through innerHTML, so the text needs
+    // no escaping and cannot be mangled by quoting.
+    copyButton.dataset.question = question;
+    copyButton.addEventListener('click', this.handleCopyQuestion.bind(this));
+
+    this.conversationElement.appendChild(message);
+    this.#scrollToBottom();
+  }
+
+  /** Copies one question to the clipboard. */
+  async handleCopyQuestion(clickEvent) {
+    const copied = await this.clipboard.copy(clickEvent.currentTarget.dataset.question || '');
+    this.toast.show(copied ? 'Pertanyaan disalin.' : 'Gagal menyalin ke papan klip.');
+  }
+
+  /** Appends and returns the container an AnswerRenderer will fill. */
+  #appendAnswerContainer() {
+    const message = document.createElement('div');
+    message.className = 'message answer';
+    const block = document.createElement('div');
+    block.className = 'answer-block';
+    message.appendChild(block);
+    this.conversationElement.appendChild(message);
+    return block;
+  }
+
+  /** Toggles the send and stop buttons for the duration of a request. */
+  #setBusy(isBusy) {
+    this.sendButton.classList.toggle('hidden', isBusy);
+    this.stopButton.classList.toggle('hidden', !isBusy);
+    this.inputElement.disabled = isBusy;
+  }
+
+  /** Keeps the newest content in view during streaming. */
+  #scrollToBottom() {
+    this.conversationElement.scrollTop = this.conversationElement.scrollHeight;
+  }
+}
+
+/* ------------------------------------------------------------ browse panel */
+
+/** Retrieval-only search that shows passages and their raw scores. */
+class BrowsePanel {
+  constructor(apiClient, toast, settingsReader, clipboard) {
+    this.api = apiClient;
+    this.toast = toast;
+    this.settings = settingsReader;
+    this.clipboard = clipboard || new ClipboardWriter();
+    this.escaper = new HtmlEscaper();
+    document.getElementById('browse-form')
+      .addEventListener('submit', this.handleSubmit.bind(this));
+  }
+
+  /** Runs a retrieval-only query and renders the passages. */
+  async handleSubmit(submitEvent) {
+    submitEvent.preventDefault();
+    const question = document.getElementById('input-browse').value.trim();
+    if (!question) return;
+
+    const resultsElement = document.getElementById('browse-results');
+    resultsElement.innerHTML = '<p class="empty-hint">Mencari…</p>';
+
+    try {
+      const result = await this.api.search({
+        question,
+        folder_filter: this.settings.folderFilter() || null,
+        passage_count: Math.max(10, this.settings.passageCount()),
+      });
+      this.#render(resultsElement, result.passages);
+    } catch (error) {
+      resultsElement.innerHTML = `<p class="empty-hint">Gagal mencari: ${this.escaper.escape(error.message)}</p>`;
+    }
+  }
+
+  /** Paints the passage list, or an empty-state message. */
+  #render(resultsElement, passages) {
+    if (!passages || passages.length === 0) {
+      resultsElement.innerHTML = '<p class="empty-hint">Tidak ada potongan yang cocok.</p>';
+      return;
+    }
+    resultsElement.innerHTML = passages.map(this.#renderPassage.bind(this)).join('');
+
+    // Exactly one copy button is rendered per passage, in the same order, so
+    // the two lists line up index for index. The text is attached as a property
+    // rather than an attribute, so it never has to survive HTML escaping.
+    const buttons = resultsElement.querySelectorAll('.passage-copy');
+    buttons.forEach((button, index) => {
+      const passage = passages[index];
+      if (!passage) return;
+      button.dataset.passageText = passage.text || '';
+      button.dataset.documentName = passage.document_name || '';
+      button.dataset.sectionLabel = passage.section_label || '';
+      button.dataset.relativePath = passage.relative_path || '';
+      button.addEventListener('click', this.handleCopyPassage.bind(this));
+    });
+  }
+
+  /** Copies one retrieved passage, with the document it came from. */
+  async handleCopyPassage(clickEvent) {
+    const button = clickEvent.currentTarget;
+    const attributed =
+      `"${button.dataset.passageText}"\n` +
+      `— ${button.dataset.documentName} (${button.dataset.sectionLabel})\n` +
+      `  ${button.dataset.relativePath}`;
+    const copied = await this.clipboard.copy(attributed);
+    this.toast.show(copied ? 'Potongan disalin beserta sumbernya.' : 'Gagal menyalin.');
+  }
+
+  /** Renders one passage card with its individual retrieval scores. */
+  #renderPassage(passage) {
+    const scoreParts = [];
+    if (passage.dense_score !== null && passage.dense_score !== undefined) {
+      scoreParts.push(`semantik ${passage.dense_score.toFixed(3)}`);
+    }
+    if (passage.sparse_score !== null && passage.sparse_score !== undefined) {
+      scoreParts.push(`kata kunci ${passage.sparse_score.toFixed(2)}`);
+    }
+    if (passage.reranked_score !== null && passage.reranked_score !== undefined) {
+      scoreParts.push(`rerank ${passage.reranked_score.toFixed(3)}`);
+    }
+    const ocrBadge = passage.produced_by_ocr ? '<span class="badge ocr">OCR</span>' : '';
+
+    return `
+      <div class="passage-item">
+        <div class="source-card-header">
+          <span class="source-number">${passage.citation_number}</span>
+          <span class="source-name">${this.escaper.escape(passage.document_name)}</span>
+          ${ocrBadge}
+        </div>
+        <div class="source-meta">${this.escaper.escape(passage.relative_path)} · ${this.escaper.escape(passage.section_label)}</div>
+        <div class="source-excerpt">${this.escaper.escape(passage.text)}</div>
+        <div class="passage-footer">
+          <span class="passage-scores">${scoreParts.map((part) => this.escaper.escape(part)).join(' · ')}</span>
+          <span class="passage-actions">
+            <button class="link-button passage-copy">Salin potongan</button>
+            <a class="link-button" download
+               href="/api/documents/${encodeURIComponent(passage.document_id)}/download">Unduh</a>
+          </span>
+        </div>
+      </div>`;
+  }
+}
+
+/* --------------------------------------------------------- documents panel */
+
+/** Lists indexed documents with their status and chunk counts. */
+class DocumentsPanel {
+  constructor(apiClient, formatter, toast) {
+    this.api = apiClient;
+    this.formatter = formatter;
+    this.toast = toast;
+    this.escaper = new HtmlEscaper();
+    this.loadedDocuments = [];
+    //: Reveal/open act on the server's desktop, so they are hidden from
+    //: visitors arriving over the network until proven local.
+    this.isLocalClient = false;
+
+    document.getElementById('button-refresh-documents')
+      .addEventListener('click', this.refresh.bind(this));
+    document.getElementById('select-document-status')
+      .addEventListener('change', this.refresh.bind(this));
+    document.getElementById('input-document-filter')
+      .addEventListener('input', this.renderRows.bind(this));
+  }
+
+  /** Fetches the document list for the selected status filter. */
+  async refresh() {
+    const statusFilter = document.getElementById('select-document-status').value;
+    try {
+      const result = await this.api.fetchDocuments(statusFilter);
+      this.loadedDocuments = result.documents || [];
+      this.renderRows();
+    } catch (error) {
+      this.toast.show(`Gagal memuat daftar dokumen: ${error.message}`);
+    }
+  }
+
+  /** Renders rows matching the free-text filter box. */
+  renderRows() {
+    const filterText = document.getElementById('input-document-filter').value.trim().toLowerCase();
+    const tableBody = document.getElementById('document-rows');
+    const visibleDocuments = filterText
+      ? this.loadedDocuments.filter((document_) =>
+          `${document_.display_name} ${document_.relative_path}`.toLowerCase().includes(filterText))
+      : this.loadedDocuments;
+
+    if (visibleDocuments.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);padding:22px 10px">Tidak ada dokumen.</td></tr>';
+      return;
+    }
+    tableBody.innerHTML = visibleDocuments.map(this.#renderRow.bind(this)).join('');
+    for (const button of tableBody.querySelectorAll('.link-button')) {
+      button.addEventListener('click', this.handleReveal.bind(this));
+    }
+  }
+
+  /** Renders one table row for a document. */
+  #renderRow(documentRecord) {
+    const statusLabels = { indexed: 'Terindeks', empty: 'Kosong', failed: 'Gagal' };
+    const errorLine = documentRecord.error_message
+      ? `<div class="document-path-cell" style="color:var(--danger)">${this.escaper.escape(documentRecord.error_message)}</div>`
+      : '';
+    const scannedLine = documentRecord.scanned_section_count > 0
+      ? `<div class="document-path-cell" style="color:var(--warning)">${documentRecord.scanned_section_count} halaman hasil pindai</div>`
+      : '';
+
+    return `
+      <tr>
+        <td>
+          <div class="document-name-cell">${this.escaper.escape(documentRecord.display_name)}</div>
+          <div class="document-path-cell">${this.escaper.escape(documentRecord.relative_path)}</div>
+          ${errorLine}${scannedLine}
+        </td>
+        <td>${this.escaper.escape(documentRecord.top_level_folder)}</td>
+        <td><span class="status-pill ${documentRecord.status}">${statusLabels[documentRecord.status] || documentRecord.status}</span></td>
+        <td class="numeric">${this.formatter.fileSize(documentRecord.size_bytes)}</td>
+        <td class="numeric">${this.formatter.count(documentRecord.chunk_count)}</td>
+        <td class="numeric">${this.formatter.count(documentRecord.section_count)}</td>
+        <td class="action-cell">
+          <a class="link-button" download
+             href="/api/documents/${encodeURIComponent(documentRecord.document_id)}/download">Unduh</a>
+          ${this.isLocalClient
+            ? `<button class="link-button" data-document-id="${this.escaper.escape(documentRecord.document_id)}">Tampilkan</button>`
+            : ''}
+        </td>
+      </tr>`;
+  }
+
+  /** Records whether reveal/open are meaningful for this visitor. */
+  setLocalClient(isLocal) {
+    this.isLocalClient = isLocal;
+  }
+
+  /** Reveals the selected document in Explorer on the server machine. */
+  async handleReveal(clickEvent) {
+    try {
+      await this.api.runFileAction(clickEvent.currentTarget.dataset.documentId, 'reveal');
+    } catch (error) {
+      this.toast.show(`Gagal membuka: ${error.message}`);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+/** Switches between the ask, browse and documents panels. */
+class TabController {
+  constructor(onTabShown) {
+    this.onTabShown = onTabShown;
+    for (const tab of document.querySelectorAll('.tab')) {
+      tab.addEventListener('click', this.handleClick.bind(this));
+    }
+  }
+
+  /** Activates the clicked tab and its panel. */
+  handleClick(clickEvent) {
+    const tabName = clickEvent.currentTarget.dataset.tab;
+    for (const tab of document.querySelectorAll('.tab')) {
+      tab.classList.toggle('active', tab.dataset.tab === tabName);
+    }
+    for (const panel of document.querySelectorAll('.tab-panel')) {
+      panel.classList.toggle('active', panel.id === `panel-${tabName}`);
+    }
+    if (this.onTabShown) this.onTabShown(tabName);
+  }
+}
+
+/* ------------------------------------------------------------ application */
+
+/** Reads the current values of the sidebar's retrieval controls. */
+class RetrievalSettingsReader {
+  /** The selected folder filter, or an empty string for the whole corpus. */
+  folderFilter() {
+    return document.getElementById('select-folder').value;
+  }
+
+  /** The selected language-model backend identifier. */
+  backendName() {
+    return document.getElementById('select-backend').value;
+  }
+
+  /** How many passages to place in the answer context. */
+  passageCount() {
+    return Number(document.getElementById('input-passages').value);
+  }
+}
+
+/** Composes every component and starts the interface. */
+class Application {
+  constructor() {
+    this.api = new ApiClient();
+    this.formatter = new ValueFormatter();
+    this.toast = new Toast(document.getElementById('toast'));
+    this.settings = new RetrievalSettingsReader();
+
+    this.clipboard = new ClipboardWriter();
+
+    this.statusPanel = new StatusPanel(this.api, this.formatter, this.toast);
+    this.ingestPanel = new IngestPanel(
+      this.api, this.formatter, this.toast, this.handleIngestFinished.bind(this)
+    );
+    this.conversation = new ConversationView(
+      this.api, this.toast, this.settings, this.clipboard
+    );
+    this.sessionPanel = new SessionPanel(
+      this.api, this.formatter, this.toast, this.handleSessionOpened.bind(this)
+    );
+    this.conversation.onTurnCompleted = this.handleTurnCompleted.bind(this);
+    this.browsePanel = new BrowsePanel(this.api, this.toast, this.settings, this.clipboard);
+    this.documentsPanel = new DocumentsPanel(this.api, this.formatter, this.toast);
+    this.tabs = new TabController(this.handleTabShown.bind(this));
+
+    document.getElementById('select-backend')
+      .addEventListener('change', this.statusPanel.renderSelectedBackendDetail.bind(this.statusPanel));
+    document.getElementById('input-passages')
+      .addEventListener('input', this.handlePassageCountChange.bind(this));
+  }
+
+  /** Loads initial state and resumes any indexing run already in progress. */
+  async start() {
+    const status = await this.statusPanel.refresh();
+    this.documentsPanel.setLocalClient(Boolean(status && status.client && status.client.is_local));
+    await this.refreshFolders();
+    await this.sessionPanel.refresh();
+    await this.ingestPanel.resumeIfRunning();
+  }
+
+  /** Opens a session chosen in the sidebar, or clears the view for a new one. */
+  async handleSessionOpened(sessionId, isNew) {
+    if (!sessionId) {
+      this.conversation.startNewConversation(null);
+      return;
+    }
+    if (isNew) this.conversation.startNewConversation(sessionId);
+    else await this.conversation.openSession(sessionId);
+  }
+
+  /** Refreshes the sidebar after a turn so titles and times stay current. */
+  async handleTurnCompleted(sessionId) {
+    await this.sessionPanel.refresh();
+    if (sessionId) this.sessionPanel.setActiveSession(sessionId);
+  }
+
+  /** Repopulates the folder filter from the index. */
+  async refreshFolders() {
+    try {
+      const result = await this.api.fetchFolders();
+      const select = document.getElementById('select-folder');
+      const previousChoice = select.value;
+      select.innerHTML = '<option value="">Semua folder</option>';
+      for (const folderName of result.folders || []) {
+        const option = document.createElement('option');
+        option.value = folderName;
+        option.textContent = folderName;
+        select.appendChild(option);
+      }
+      select.value = previousChoice;
+    } catch {
+      /* An empty index has no folders yet; the default option is enough. */
+    }
+  }
+
+  /** Refreshes status and filters once an indexing run completes. */
+  async handleIngestFinished() {
+    await this.statusPanel.refresh();
+    await this.refreshFolders();
+  }
+
+  /** Loads the document table the first time its tab is opened. */
+  handleTabShown(tabName) {
+    if (tabName === 'documents' && this.documentsPanel.loadedDocuments.length === 0) {
+      this.documentsPanel.refresh();
+    }
+  }
+
+  /** Mirrors the passage-count slider into its label. */
+  handlePassageCountChange() {
+    document.getElementById('passage-count-label').textContent =
+      document.getElementById('input-passages').value;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function bootstrapApplication() {
+  const application = new Application();
+  application.start();
+});
