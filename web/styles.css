@@ -520,6 +520,32 @@ html, body {
   border-bottom-color: var(--brand-orange);
 }
 
+/* Looks like a tab but leaves the app: it opens the API documentation in a new
+   browser tab rather than switching panels. Deliberately class `tab-link`, not
+   `tab` — the tab controller collects `.tab` and reads `data-tab` from each, so
+   a link joining that set would deactivate every panel and blank the view. The
+   separator and the arrow tell the reader it goes elsewhere. */
+.tab-link {
+  display: flex;
+  align-items: center;
+  padding: 15px 17px;
+  margin-left: 6px;
+  border-left: 1px solid var(--border-soft);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 130ms ease;
+}
+
+.tab-link:hover {
+  color: var(--accent-text);
+  border-bottom-color: color-mix(in srgb, var(--brand-orange) 45%, transparent);
+}
+
 .tab-panel {
   display: none;
   flex: 1;
