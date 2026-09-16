@@ -114,7 +114,7 @@ kehilangan vektor, dan membacanya ulang secara otomatis.
 .\.venv\Scripts\python.exe main.py serve
 ```
 
-Buka **http://127.0.0.1:8000**.
+Buka **http://127.0.0.1:8026**.
 
 Selama pengembangan:
 
@@ -134,14 +134,14 @@ dijangkau dari komputer lain. Untuk membukanya ke jaringan lokal:
 ```
 
 Saat dijalankan dengan `0.0.0.0`, program mencetak alamat IP komputer ini
-sehingga rekan kerja tinggal membuka `http://<alamat-itu>:8000`.
+sehingga rekan kerja tinggal membuka `http://<alamat-itu>:8026`.
 
 Windows Firewall biasanya masih memblokir. Izinkan porta tersebut sekali saja
 (jalankan PowerShell **sebagai Administrator**):
 
 ```powershell
 New-NetFirewallRule -DisplayName "Akreditasi RAG" -Direction Inbound `
-  -LocalPort 8000 -Protocol TCP -Action Allow -Profile Private
+  -LocalPort 8026 -Protocol TCP -Action Allow -Profile Private
 ```
 
 Agar permanen, setel pada `.env`:
@@ -150,9 +150,9 @@ Agar permanen, setel pada `.env`:
 HOST=0.0.0.0
 ```
 
-> **Tidak ada autentikasi.** Siapa pun yang dapat menjangkau komputer ini di
-> jaringan akan dapat membaca seluruh dokumen akreditasi yang terindeks, tanpa
-> perlu kata sandi. Gunakan `-Profile Private` seperti di atas agar aturan
+> **Setiap pengunjung wajib login** sebagai `admin` atau `guest`. Siapa pun yang
+> memegang kata sandi `guest` dapat membaca seluruh dokumen akreditasi yang
+> terindeks, jadi bagikan hanya ke tim. Gunakan `-Profile Private` seperti di atas agar aturan
 > firewall tidak berlaku pada jaringan publik, dan matikan kembali ke
 > `127.0.0.1` bila sedang tidak diperlukan.
 
@@ -237,8 +237,9 @@ ulang secara manual lalu jalankan `main.py ingest`.
 
 ## Keamanan
 
-- Server hanya mendengarkan di `127.0.0.1` dan **tidak memiliki autentikasi**.
-  Mengubah `HOST` berarti membuka korpus internal ke jaringan.
+- Server hanya mendengarkan di `127.0.0.1` secara bawaan dan mewajibkan login
+  (`admin` atau `guest`). Mengubah `HOST` berarti membuka korpus internal ke
+  siapa pun di jaringan yang memegang kata sandi `guest`.
 - `.env` dapat memuat kredensial dan sudah dikecualikan oleh `.gitignore`.
   Jangan menyimpan kata sandi dalam teks biasa bila dapat dihindari.
 - Backend CLI mengirimkan kutipan dokumen ke penyedia layanannya. Untuk materi

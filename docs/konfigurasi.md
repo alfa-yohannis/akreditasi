@@ -165,12 +165,24 @@ merupakan pilihan paling tepat untuk perkakas yang sudah Anda konfigurasikan.
 | Variabel | Bawaan | Keterangan |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Hanya loopback |
-| `PORT` | `8000` | Porta HTTP |
+| `PORT` | `8026` | Porta HTTP |
 | `ALLOW_OPEN_FILE` | `1` | Izinkan antarmuka membuka berkas yang disitasi |
 
 Mengubah `HOST` menjadi `0.0.0.0` membuka korpus akreditasi internal ke seluruh
-jaringan lokal, tanpa autentikasi apa pun. Jangan lakukan kecuali Anda memang
-memahami konsekuensinya.
+jaringan lokal. Pengunjung tetap wajib login, tetapi pemegang kata sandi `guest`
+dapat membaca seluruh dokumen. Jangan lakukan kecuali Anda memang memahami
+konsekuensinya.
+
+| Variabel | Bawaan | Keterangan |
+|---|---|---|
+| `ADMIN_USERNAME` | `admin` | Nama pengguna admin |
+| `ADMIN_PASSWORD_HASH` | *(hash bawaan)* | Hash PBKDF2 kata sandi admin |
+| `GUEST_USERNAME` | `guest` | Nama pengguna guest |
+| `GUEST_PASSWORD_HASH` | *(hash bawaan)* | Hash PBKDF2 kata sandi guest |
+| `SESSION_SECRET` | *(acak, disimpan di `data/`)* | Kunci penanda tangan cookie sesi |
+| `SESSION_HOURS` | `12` | Lama sesi login berlaku |
+
+Buat hash kata sandi baru dengan `python main.py hash-password`.
 
 ---
 

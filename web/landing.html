@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="id" class="no-js">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Akreditasi RAG — Magister Teknik Informatika Pradita</title>
+  <meta name="description" content="Tanya jawab atas seluruh dokumen akreditasi MTI 2026, dengan sitasi ke dokumen sumber di setiap jawaban.">
+  <meta name="theme-color" content="#f26e21">
+  <link rel="stylesheet" href="/static/landing.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+</head>
+<body>
+  <a class="skip-link" href="#masuk">Langsung ke formulir masuk</a>
+
+  <!-- ============================== NAV ============================== -->
+  <header class="nav" id="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="/" aria-label="Akreditasi RAG, beranda">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="30" height="30">
+            <rect x="2" y="2" width="28" height="28" rx="8" fill="currentColor"/>
+            <path d="M10 22V10h7.2a4.2 4.2 0 0 1 0 8.4H13.4M16.5 18.4 22 22" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brand-text">Akreditasi<span class="brand-accent">RAG</span></span>
+      </a>
+      <nav class="nav-links" aria-label="Navigasi utama">
+        <a href="#fitur">Fitur</a>
+        <a href="#cara-kerja">Cara Kerja</a>
+        <a href="#hak-akses">Hak Akses</a>
+        <a href="#keamanan">Keamanan</a>
+      </nav>
+      <a class="btn btn-primary btn-small" href="#masuk" data-signed-out>Masuk</a>
+      <a class="btn btn-primary btn-small hidden" href="/app" data-signed-in>Buka Aplikasi →</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============================== HERO ============================== -->
+    <section class="hero">
+      <div class="hero-backdrop" aria-hidden="true">
+        <div class="glow glow-orange"></div>
+        <div class="glow glow-green"></div>
+        <div class="grid-lines"></div>
+      </div>
+
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow reveal">
+            <span class="eyebrow-dot" aria-hidden="true"></span>
+            Magister Teknik Informatika &middot; LAM INFOKOM 2026
+          </p>
+          <h1 class="hero-title reveal">
+            Setiap jawaban akreditasi,
+            <span class="gradient-text">lengkap dengan buktinya.</span>
+          </h1>
+          <p class="hero-lede reveal">
+            Tanyakan apa saja tentang borang, LKPS, EWMP, publikasi dosen, hingga
+            prosedur mutu. Sistem menelusuri seluruh dokumen akreditasi dan menjawab
+            dengan sitasi yang bisa langsung Anda periksa.
+          </p>
+
+          <div class="hero-actions reveal">
+            <a class="btn btn-primary btn-large" href="#masuk" data-signed-out>Masuk sekarang</a>
+            <a class="btn btn-primary btn-large hidden" href="/app" data-signed-in>Buka Aplikasi →</a>
+            <a class="btn btn-ghost btn-large" href="#cara-kerja">Lihat cara kerjanya</a>
+          </div>
+
+          <dl class="stat-strip reveal" id="stat-strip" aria-live="polite">
+            <div class="stat">
+              <dt>Dokumen</dt>
+              <dd><span data-counter="document_count">–</span></dd>
+            </div>
+            <div class="stat">
+              <dt>Potongan teks</dt>
+              <dd><span data-counter="chunk_count">–</span></dd>
+            </div>
+            <div class="stat">
+              <dt>Folder</dt>
+              <dd><span data-counter="folder_count">–</span></dd>
+            </div>
+            <div class="stat">
+              <dt>Diperbarui</dt>
+              <dd class="stat-date" id="stat-updated">–</dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- ------------------------- SIGN-IN CARD ------------------------- -->
+        <div class="auth-column reveal" id="masuk">
+          <div class="auth-card" id="auth-card">
+            <div class="auth-signed-in hidden" id="auth-signed-in">
+              <div class="auth-avatar" id="auth-avatar" aria-hidden="true">A</div>
+              <h2 class="auth-title">Selamat datang kembali</h2>
+              <p class="auth-subtitle">Anda masuk sebagai <strong id="auth-current-name">admin</strong>
+                <span class="role-pill" id="auth-current-role">Admin</span></p>
+              <a class="btn btn-primary btn-block" href="/app">Buka Aplikasi →</a>
+              <button class="btn btn-ghost btn-block" type="button" id="button-sign-out">Keluar</button>
+            </div>
+
+            <div id="auth-signed-out">
+              <h2 class="auth-title">Masuk ke Akreditasi RAG</h2>
+              <p class="auth-subtitle">Gunakan akun Admin atau Guest Anda.</p>
+
+              <form class="auth-panel" id="sign-in-form" novalidate>
+                <label class="field">
+                  <span class="field-label">Nama pengguna</span>
+                  <input class="input" type="text" id="input-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+                </label>
+                <label class="field">
+                  <span class="field-label">Kata sandi</span>
+                  <span class="password-wrap">
+                    <input class="input" type="password" id="input-password" name="password" autocomplete="current-password" required>
+                    <button class="reveal-password" type="button" id="button-toggle-password" aria-label="Tampilkan kata sandi" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+                    </button>
+                  </span>
+                </label>
+                <p class="caps-hint hidden" id="caps-hint">Caps Lock aktif</p>
+                <p class="form-error hidden" id="sign-in-error" role="alert"></p>
+                <button class="btn btn-primary btn-block" type="submit" id="button-sign-in">
+                  <span class="btn-label">Masuk</span>
+                  <span class="spinner" aria-hidden="true"></span>
+                </button>
+              </form>
+
+              <div class="role-hints" aria-label="Hak akses per peran">
+                <div class="role-hint">
+                  <span class="role-pill">Admin</span>
+                  <span>Akses penuh, termasuk memperbarui dan membangun ulang indeks.</span>
+                </div>
+                <div class="role-hint">
+                  <span class="role-pill guest">Guest</span>
+                  <span>Tanya jawab dan telusuri seluruh dokumen, tanpa mengubah indeks.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ------------------------- PRODUCT DEMO ------------------------- -->
+      <div class="container">
+        <figure class="demo reveal" aria-label="Contoh tanya jawab">
+          <div class="demo-chrome" aria-hidden="true">
+            <span></span><span></span><span></span>
+            <div class="demo-url">akreditasi-rag / tanya-jawab</div>
+          </div>
+          <div class="demo-body">
+            <div class="demo-question">
+              <span class="demo-avatar">A</span>
+              <p id="demo-question-text">Berapa rata-rata beban EWMP DTPR pada TS?</p>
+            </div>
+            <div class="demo-answer">
+              <span class="demo-avatar demo-avatar-ai" aria-hidden="true">✦</span>
+              <div class="demo-answer-body">
+                <p id="demo-answer-text" class="demo-typing">Rata-rata EWMP dosen tetap pada TS adalah <strong>12,5 SKS per semester</strong><span class="chip">1</span>, masih dalam rentang ideal 12–16 SKS yang disyaratkan instrumen<span class="chip">2</span>.</p>
+                <div class="demo-sources">
+                  <div class="source-card">
+                    <span class="source-num">1</span>
+                    <div>
+                      <strong>LKPS Tabel 3.a.3 — EWMP DTPR.xlsx</strong>
+                      <span>3. Sumber Daya Manusia › Lembar EWMP</span>
+                    </div>
+                    <span class="source-score">0,94</span>
+                  </div>
+                  <div class="source-card">
+                    <span class="source-num">2</span>
+                    <div>
+                      <strong>S2-Matriks Penilaian.pdf</strong>
+                      <span>LAMINFOKOM › Referensi › halaman 18</span>
+                    </div>
+                    <span class="source-score">0,88</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption class="demo-caption">Ilustrasi. Setiap angka dalam lingkaran menaut ke dokumen sumbernya.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============================ FEATURES ============================ -->
+    <section class="section" id="fitur">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="section-kicker">Fitur</p>
+          <h2 class="section-title">Dibuat untuk tim borang yang harus bisa mempertanggungjawabkan setiap angka.</h2>
+        </header>
+
+        <div class="feature-grid">
+          <article class="feature feature-wide reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M7 8h10M7 12h6M5 20l3-3h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14Z"/></svg>
+            </div>
+            <h3>Sitasi di setiap jawaban</h3>
+            <p>Jawaban tidak pernah berdiri sendiri. Setiap klaim menaut ke dokumen, bagian, dan potongan teks asalnya, sehingga asesor dapat memverifikasi dalam satu klik.</p>
+            <div class="feature-visual" aria-hidden="true">
+              <span class="chip">1</span><span class="chip">2</span><span class="chip">3</span>
+              <span class="feature-visual-line"></span>
+            </div>
+          </article>
+
+          <article class="feature reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/></svg>
+            </div>
+            <h3>Pencarian hibrida</h3>
+            <p>Makna dan kata kunci digabung, lalu diperingkat ulang oleh cross-encoder. Istilah seperti “EWMP” dan “DTPR” tetap ditemukan dengan tepat.</p>
+          </article>
+
+          <article class="feature reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            </div>
+            <h3>Baca-saja, selalu</h3>
+            <p>Dokumen di shared drive hanya dibaca. Indeks disimpan terpisah, dan server menolak berjalan bila konfigurasinya berisiko menulis ke korpus.</p>
+          </article>
+
+          <article class="feature reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+            </div>
+            <h3>PDF, Word, Excel, PowerPoint</h3>
+            <p>Lebih dari seribu berkas lintas format dibaca menjadi teks, termasuk halaman hasil pindai melalui OCR bila diaktifkan.</p>
+          </article>
+
+          <article class="feature reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+            </div>
+            <h3>Percakapan tersimpan</h3>
+            <p>Lanjutkan pertanyaan kemarin tanpa mengulang konteks. Pertanyaan lanjutan dipahami dalam alur percakapannya.</p>
+          </article>
+
+          <article class="feature reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>
+            </div>
+            <h3>Dokumen sumber sekali klik</h3>
+            <p>Dari sitasi langsung ke berkas aslinya: unduh dari komputer mana pun di jaringan, atau buka di Explorer pada server.</p>
+          </article>
+
+          <article class="feature feature-wide reveal">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6.3 6.3l2.1 2.1M15.6 15.6l2.1 2.1M6.3 17.7l2.1-2.1M15.6 8.4l2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <h3>Pilih model bahasa</h3>
+            <p>Jalankan sepenuhnya lokal lewat Ollama sehingga dokumen tidak meninggalkan komputer, atau gunakan model awan untuk penalaran yang lebih dalam.</p>
+            <div class="model-tags" aria-label="Model yang didukung">
+              <span>Ollama · lokal</span><span>Claude</span><span>Codex</span><span>Gemini</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== HOW IT WORKS =========================== -->
+    <section class="section section-tinted" id="cara-kerja">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="section-kicker">Cara Kerja</p>
+          <h2 class="section-title">Dari ribuan halaman ke satu jawaban yang bisa diperiksa, dalam empat langkah.</h2>
+        </header>
+
+        <ol class="pipeline">
+          <li class="pipeline-step reveal">
+            <span class="step-number">01</span>
+            <h3>Indeks</h3>
+            <p>Dokumen dipecah menjadi potongan ±450 token dan diubah menjadi vektor makna serta indeks kata kunci.</p>
+          </li>
+          <li class="pipeline-step reveal">
+            <span class="step-number">02</span>
+            <h3>Temukan</h3>
+            <p>Pertanyaan dicocokkan secara semantik dan leksikal sekaligus, lalu hasilnya digabung.</p>
+          </li>
+          <li class="pipeline-step reveal">
+            <span class="step-number">03</span>
+            <h3>Peringkat ulang</h3>
+            <p>Cross-encoder membaca ulang kandidat teratas dan memilih yang benar-benar relevan.</p>
+          </li>
+          <li class="pipeline-step reveal">
+            <span class="step-number">04</span>
+            <h3>Jawab &amp; sitasi</h3>
+            <p>Model bahasa hanya menjawab dari potongan terpilih dan menandai setiap sumbernya.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================== ROLES ============================== -->
+    <section class="section" id="hak-akses">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="section-kicker">Hak Akses</p>
+          <h2 class="section-title">Dua peran, batas yang jelas.</h2>
+        </header>
+
+        <div class="role-grid">
+          <article class="role-card reveal">
+            <div class="role-head">
+              <span class="role-dot role-dot-guest" aria-hidden="true">G</span>
+              <div>
+                <h3>Guest</h3>
+                <p>Untuk asesor, dosen, dan tenaga kependidikan.</p>
+              </div>
+            </div>
+            <ul class="role-list">
+              <li><span class="check">✓</span> Tanya jawab dengan sitasi</li>
+              <li><span class="check">✓</span> Telusuri potongan dokumen</li>
+              <li><span class="check">✓</span> Daftar dokumen &amp; unduhan</li>
+              <li><span class="check">✓</span> Riwayat percakapan</li>
+              <li class="muted"><span class="cross">✕</span> Perbarui indeks</li>
+              <li class="muted"><span class="cross">✕</span> Bangun ulang indeks</li>
+            </ul>
+          </article>
+
+          <article class="role-card role-card-admin reveal">
+            <div class="role-head">
+              <span class="role-dot role-dot-admin" aria-hidden="true">A</span>
+              <div>
+                <h3>Admin</h3>
+                <p>Untuk pengelola sistem dan tim borang inti.</p>
+              </div>
+            </div>
+            <ul class="role-list">
+              <li><span class="check">✓</span> Semua yang dapat dilakukan Guest</li>
+              <li><span class="check">✓</span> Perbarui indeks saat dokumen berubah</li>
+              <li><span class="check">✓</span> Bangun ulang indeks dari nol</li>
+              <li><span class="check">✓</span> Pantau log dan progres indexing</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ SECURITY ============================ -->
+    <section class="section section-dark" id="keamanan">
+      <div class="container security">
+        <div class="security-copy reveal">
+          <p class="section-kicker">Keamanan</p>
+          <h2 class="section-title">Dokumen internal tetap internal.</h2>
+          <p>Sistem berjalan di komputer kampus. Dengan model lokal, tidak satu kalimat pun keluar dari jaringan. Saat memakai model awan, antarmuka menyatakannya dengan jelas sebelum Anda bertanya.</p>
+        </div>
+        <ul class="security-list">
+          <li class="reveal">
+            <strong>Sesi bertanda tangan</strong>
+            <span>Cookie HttpOnly dengan tanda tangan HMAC-SHA256; tidak dapat dibaca skrip maupun dipalsukan.</span>
+          </li>
+          <li class="reveal">
+            <strong>Kata sandi di-hash</strong>
+            <span>PBKDF2-SHA256 dengan 600.000 iterasi. Kata sandi asli tidak pernah disimpan.</span>
+          </li>
+          <li class="reveal">
+            <strong>Perlindungan tebakan</strong>
+            <span>Alamat yang lima kali salah memasukkan kata sandi dikunci sementara.</span>
+          </li>
+          <li class="reveal">
+            <strong>Hak akses di server</strong>
+            <span>Pembatasan peran diperiksa di server, bukan hanya disembunyikan di tampilan.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================== CTA ============================== -->
+    <section class="section cta">
+      <div class="container cta-inner reveal">
+        <h2>Siap menyiapkan akreditasi dengan lebih tenang?</h2>
+        <p>Masuk dan ajukan pertanyaan pertama Anda.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-large" href="#masuk" data-signed-out>Masuk sekarang</a>
+          <a class="btn btn-primary btn-large hidden" href="/app" data-signed-in>Buka Aplikasi →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>© <span id="footer-year">2026</span> Magister Teknik Informatika, Universitas Pradita</span>
+      <span class="footer-muted">Akreditasi RAG &middot; LAM INFOKOM 2026</span>
+    </div>
+  </footer>
+
+  <script src="/static/landing.js"></script>
+</body>
+</html>

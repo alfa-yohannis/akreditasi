@@ -3,7 +3,9 @@
    ==========================================================================
    Organised as small classes, each owning one region of the interface:
 
+     SessionGuard           returns to the landing page when a session ends
      ApiClient              HTTP access, the only place fetch() is called
+     AccountBar             signed-in user, role badge and sign-out
      ServerSentEventReader  turns a streaming response into typed events
      Toast                  transient notifications
      StatusPanel            sidebar system status
@@ -175,6 +177,13 @@ class CitationLinker {
 /* ------------------------------------------------------------------- http */
 
 /** Every HTTP call the interface makes. */
+/** Sends the visitor back to the landing page once their session has ended. */
+class SessionGuard {
+  static redirectToSignIn() {
+    window.location.assign('/#masuk');
+  }
+}
+
 class ApiClient {
   /** Reads the system status, index statistics and backend availability. */
   async fetchStatus() {
@@ -226,6 +235,7 @@ class ApiClient {
       body: JSON.stringify(payload),
       signal: abortSignal,
     });
+    if (response.status === 401) SessionGuard.redirectToSignIn();
     if (!response.ok) {
       throw new Error(`Server menolak permintaan (HTTP ${response.status})`);
     }
@@ -280,9 +290,20 @@ class ApiClient {
     return this.#readJson(response);
   }
 
+  /** Reports who is signed in and with which role. */
+  async fetchCurrentUser() {
+    return this.#readJson(await fetch('/api/auth/me'));
+  }
+
+  /** Ends the session on the server. */
+  async signOut() {
+    return this.#readJson(await fetch('/api/auth/logout', { method: 'POST' }));
+  }
+
   /** Parses a JSON response, raising the server's detail message on failure. */
   async #readJson(response) {
     const parsed = await response.json().catch(() => ({}));
+    if (response.status === 401) SessionGuard.redirectToSignIn();
     if (!response.ok) {
       throw new Error(parsed.detail || parsed.message || `HTTP ${response.status}`);
     }
@@ -641,13 +662,12 @@ class StatusPanel {
       this.backendStatusesByName.set(backend.backend_name, backend);
       const option = document.createElement('option');
       option.value = backend.backend_name;
-      // The model and its reasoning depth belong on the option itself: they are
-      // the whole basis for choosing between backends, and putting them only in
-      // the detail line below means they are read after the choice, not before.
+      // The model belongs on the option itself: it is the basis for choosing
+      // between backends, and putting it only in the detail line below means it
+      // is read after the choice, not before.
       const readiness = backend.is_available ? '' : '  (tidak siap)';
-      const effort = backend.effort ? ` · effort ${backend.effort}` : '';
       option.textContent =
-        `${this.#backendLabel(backend.backend_name)} — ${backend.model_name}${effort}${readiness}`;
+        `${this.#backendLabel(backend.backend_name)} — ${backend.model_name}${readiness}`;
       select.appendChild(option);
     }
 
@@ -659,7 +679,7 @@ class StatusPanel {
 
   /** Friendly display name for a backend identifier. */
   #backendLabel(backendName) {
-    // Kept short: the model name and effort are appended after these, and the
+    // Kept short: the model name is appended after these, and the
     // sidebar dropdown is only so wide.
     const labels = {
       ollama: 'Ollama (lokal)',
@@ -688,16 +708,9 @@ class StatusPanel {
       ? '<span class="privacy-note local">Dokumen tidak meninggalkan komputer ini</span>'
       : '<span class="privacy-note remote">Kutipan dokumen dikirim ke penyedia layanan</span>';
 
-    // Reasoning depth is shown as its own badge: it is the setting most likely
-    // to be changed, and the one whose cost the operator should see.
-    const effortBadge = backend.effort
-      ? `<span class="effort-badge">effort ${escaper.escape(backend.effort)}</span>`
-      : '';
-
     detailElement.innerHTML =
       `<span class="indicator ${indicatorClass}"></span>` +
       `<strong>${escaper.escape(backend.model_name)}</strong>` +
-      effortBadge +
       `<br><span class="backend-detail">${escaper.escape(backend.detail)}</span><br>` +
       privacyNote;
   }
@@ -716,6 +729,9 @@ class IngestPanel {
     this.toast = toast;
     this.onRunFinished = onRunFinished;
     this.pollTimer = null;
+    // Assume the restricted role until the server says otherwise, so a guest
+    // never glimpses a working control during page load.
+    this.isAdmin = false;
 
     document.getElementById('button-ingest')
       .addEventListener('click', this.handleIncrementalIngest.bind(this));
@@ -723,13 +739,47 @@ class IngestPanel {
       .addEventListener('click', this.handleFullRebuild.bind(this));
   }
 
+  /** Records whether the signed-in user may change the index. */
+  setAdministrator(isAdmin) {
+    this.isAdmin = isAdmin;
+    for (const id of ['button-ingest', 'button-rebuild']) {
+      document.getElementById(id).classList.toggle('restricted', !isAdmin);
+    }
+  }
+
+  /**
+   * Tells a guest they lack the right to change the index.
+   *
+   * The buttons stay visible on purpose: guests should know the index can be
+   * refreshed and by whom. The server enforces the same rule independently.
+   */
+  #showPermissionNotice(message) {
+    const notice = document.getElementById('permission-notice');
+    notice.innerHTML =
+      '<span class="permission-icon" aria-hidden="true">🔒</span>' +
+      `<span>${new HtmlEscaper().escape(message)}</span>`;
+    notice.classList.remove('hidden');
+    // Restarted so a repeated click visibly re-announces the message.
+    notice.classList.remove('shake');
+    void notice.offsetWidth;
+    notice.classList.add('shake');
+  }
+
   /** Starts an incremental run that only re-reads changed documents. */
   async handleIncrementalIngest() {
+    if (!this.isAdmin) {
+      this.#showPermissionNotice('Anda tidak memiliki hak untuk memperbarui indeks.');
+      return;
+    }
     await this.#start(false);
   }
 
   /** Starts a full rebuild after confirming, since it discards the index. */
   async handleFullRebuild() {
+    if (!this.isAdmin) {
+      this.#showPermissionNotice('Anda tidak memiliki hak untuk membangun ulang indeks.');
+      return;
+    }
     const confirmed = window.confirm(
       'Bangun ulang indeks dari nol?\n\n' +
       'Seluruh indeks akan dihapus dan semua dokumen dibaca ulang. ' +
@@ -1060,8 +1110,7 @@ class AnswerRenderer {
     const parts = [`${this.formatter.duration(summary.elapsed_seconds)}`];
     if (summary.passage_count !== undefined) parts.push(`${summary.passage_count} sumber`);
     if (summary.model_name) {
-      const effort = summary.effort ? ` · effort ${summary.effort}` : '';
-      parts.push(`${summary.backend_name} · ${summary.model_name}${effort}`);
+      parts.push(`${summary.backend_name} · ${summary.model_name}`);
     }
 
     const footer = document.createElement('div');
@@ -1613,6 +1662,51 @@ class RetrievalSettingsReader {
   }
 }
 
+/** Shows who is signed in, with which role, and offers signing out. */
+class AccountBar {
+  constructor(apiClient, toast) {
+    this.api = apiClient;
+    this.toast = toast;
+    this.isAdmin = false;
+    document.getElementById('button-logout')
+      .addEventListener('click', this.handleSignOut.bind(this));
+  }
+
+  /** Reads the current session and paints the account bar. */
+  async refresh() {
+    let user;
+    try {
+      user = await this.api.fetchCurrentUser();
+    } catch {
+      return;
+    }
+    if (!user.signed_in) {
+      SessionGuard.redirectToSignIn();
+      return;
+    }
+    this.isAdmin = Boolean(user.is_admin);
+
+    const displayName = user.username;
+    document.getElementById('account-name').textContent = displayName;
+    document.getElementById('account-avatar').textContent = displayName.charAt(0).toUpperCase();
+    const roleBadge = document.getElementById('account-role');
+    roleBadge.textContent = this.isAdmin ? 'Admin' : 'Guest';
+    roleBadge.classList.toggle('admin', this.isAdmin);
+    document.getElementById('account-bar').classList.toggle('is-admin', this.isAdmin);
+  }
+
+  /** Ends the session and returns to the landing page. */
+  async handleSignOut() {
+    try {
+      await this.api.signOut();
+    } catch (error) {
+      this.toast.show(`Gagal keluar: ${error.message}`);
+      return;
+    }
+    window.location.assign('/');
+  }
+}
+
 /** Composes every component and starts the interface. */
 class Application {
   constructor() {
@@ -1622,6 +1716,7 @@ class Application {
     this.settings = new RetrievalSettingsReader();
 
     this.clipboard = new ClipboardWriter();
+    this.accountBar = new AccountBar(this.api, this.toast);
 
     this.statusPanel = new StatusPanel(this.api, this.formatter, this.toast);
     this.ingestPanel = new IngestPanel(
@@ -1646,6 +1741,8 @@ class Application {
 
   /** Loads initial state and resumes any indexing run already in progress. */
   async start() {
+    await this.accountBar.refresh();
+    this.ingestPanel.setAdministrator(this.accountBar.isAdmin);
     const status = await this.statusPanel.refresh();
     this.documentsPanel.setLocalClient(Boolean(status && status.client && status.client.is_local));
     await this.refreshFolders();

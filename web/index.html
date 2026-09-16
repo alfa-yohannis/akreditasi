@@ -17,6 +17,15 @@
         <p class="subtitle">Magister Teknik Informatika &middot; LAM INFOKOM 2026</p>
       </header>
 
+      <div class="account-bar" id="account-bar">
+        <span class="account-avatar" id="account-avatar" aria-hidden="true">?</span>
+        <span class="account-identity">
+          <span class="account-name" id="account-name">memuat…</span>
+          <span class="role-badge" id="account-role"></span>
+        </span>
+        <button class="button ghost compact" id="button-logout" type="button">Keluar</button>
+      </div>
+
       <section class="panel">
         <h2>Percakapan</h2>
         <div class="button-row">
@@ -50,6 +59,7 @@
           <button class="button primary" id="button-ingest">Perbarui Indeks</button>
           <button class="button ghost" id="button-rebuild" title="Hapus indeks dan baca ulang seluruh dokumen">Bangun Ulang</button>
         </div>
+        <div class="permission-notice hidden" id="permission-notice" role="alert"></div>
 
         <div class="progress-block hidden" id="ingest-progress">
           <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>

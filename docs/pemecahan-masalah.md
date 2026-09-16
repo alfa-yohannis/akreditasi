@@ -181,10 +181,10 @@ Berkas statis tidak termuat. Pastikan direktori `web\` berisi `index.html`,
 - Berkas mungkin sudah tidak ada di sumber; coba **Salin lokasi** lalu periksa
   manual.
 
-### Porta 8000 sudah dipakai
+### Porta 8026 sudah dipakai
 
 ```powershell
-.\.venv\Scripts\python.exe main.py serve --port 8080
+.\.venv\Scripts\python.exe main.py serve --port 8426
 ```
 
 ---

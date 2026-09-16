@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Iterator
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .authentication import AUTHENTICATION_SERVICE, AuthenticationService, Principal
 from .config import SETTINGS, Settings
 from .conversations import CONVERSATION_STORE
 from .embeddings import ComputeDeviceResolver
@@ -36,6 +37,13 @@ from .safety import SOURCE_GUARD
 from .storage import DOCUMENT_CATALOGUE, VECTOR_INDEX
 
 LOGGER = logging.getLogger(__name__)
+
+
+class LoginPayload(BaseModel):
+    """Body of a sign-in attempt, for either role."""
+
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class AskPayload(BaseModel):
@@ -139,9 +147,24 @@ class RevalidatingStaticFiles(StaticFiles):
 class RagWebApplication:
     """Builds and owns the FastAPI application serving the RAG interface."""
 
-    def __init__(self, settings: Settings) -> None:
+    #: Paths reachable without signing in: the landing page, its assets, and
+    #: the endpoints that perform the sign-in itself.
+    PUBLIC_PATHS = frozenset({"/", "/favicon.ico"})
+    PUBLIC_PREFIXES = ("/static/", "/api/auth/", "/api/public/")
+
+    #: Shown when a guest attempts an action reserved for the administrator.
+    ADMIN_ONLY_MESSAGE = (
+        "Anda tidak memiliki hak untuk memperbarui dan/atau membangun ulang indeks."
+    )
+
+    def __init__(
+        self,
+        settings: Settings,
+        authentication: AuthenticationService = AUTHENTICATION_SERVICE,
+    ) -> None:
         """Compose every collaborator and register the HTTP routes."""
         self._settings = settings
+        self._authentication = authentication
         self._device_resolver = ComputeDeviceResolver()
         self._file_launcher = LocalFileLauncher(settings)
         self._event_encoder = ServerSentEventEncoder()
@@ -165,12 +188,18 @@ class RagWebApplication:
             description="Pencarian dan tanya-jawab atas dokumen akreditasi MTI 2026",
             version="1.0.0",
         )
+        self.api.middleware("http")(self._require_session)
         self._register_routes()
         self._mount_static_assets()
 
     def _register_routes(self) -> None:
         """Attach every endpoint as a bound method of this application."""
-        self.api.add_api_route("/", self.serve_interface, methods=["GET"], include_in_schema=False)
+        self.api.add_api_route("/", self.serve_landing, methods=["GET"], include_in_schema=False)
+        self.api.add_api_route("/app", self.serve_interface, methods=["GET"], include_in_schema=False)
+        self.api.add_api_route("/api/auth/login", self.post_login, methods=["POST"])
+        self.api.add_api_route("/api/auth/logout", self.post_logout, methods=["POST"])
+        self.api.add_api_route("/api/auth/me", self.get_current_user, methods=["GET"])
+        self.api.add_api_route("/api/public/overview", self.get_public_overview, methods=["GET"])
         self.api.add_api_route("/api/status", self.get_status, methods=["GET"])
         self.api.add_api_route("/api/folders", self.get_folders, methods=["GET"])
         self.api.add_api_route("/api/documents", self.get_documents, methods=["GET"])
@@ -204,16 +233,117 @@ class RagWebApplication:
                 "/static", RevalidatingStaticFiles(directory=str(web_directory)), name="static"
             )
 
+    # --- Sessions -----------------------------------------------------------
+
+    def _is_public_path(self, path: str) -> bool:
+        """True for paths a visitor may reach before signing in."""
+        return path in self.PUBLIC_PATHS or path.startswith(self.PUBLIC_PREFIXES)
+
+    async def _require_session(self, request: Request, call_next):
+        """Attach the signed-in principal, refusing protected paths without one.
+
+        The check runs here, once, rather than in each handler, so a newly added
+        endpoint is protected by default instead of by remembering to be.
+        """
+        principal = self._authentication.identify(
+            request.cookies.get(AuthenticationService.COOKIE_NAME)
+        )
+        request.state.principal = principal
+        path = request.url.path
+
+        if principal is None and not self._is_public_path(path):
+            if path.startswith("/api/"):
+                return JSONResponse(
+                    {"detail": "Silakan masuk terlebih dahulu."}, status_code=401
+                )
+            # Pages (the app itself, the API docs) send the visitor to sign in.
+            return RedirectResponse("/#masuk", status_code=303)
+        return await call_next(request)
+
+    def _principal(self, request: Request) -> Principal | None:
+        """The principal the session middleware attached to ``request``."""
+        return getattr(request.state, "principal", None)
+
+    def _session_response(self, token: str, body: dict) -> JSONResponse:
+        """Return ``body`` with the session cookie set."""
+        response = JSONResponse(body)
+        response.set_cookie(
+            AuthenticationService.COOKIE_NAME,
+            token,
+            max_age=self._authentication.session_lifetime_seconds,
+            httponly=True,
+            # Lax keeps the cookie off cross-site POSTs, which is what stops
+            # another site from triggering an index rebuild through a visitor.
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    async def post_login(self, payload: LoginPayload, request: Request) -> JSONResponse:
+        """Sign in; the matching account decides whether the role is admin or guest."""
+        client_address = request.client.host if request.client else "unknown"
+        seconds_locked = self._authentication.throttle.seconds_locked(client_address)
+        if seconds_locked:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Terlalu banyak percobaan. Coba lagi dalam {seconds_locked} detik.",
+            )
+
+        token = self._authentication.authenticate(payload.username, payload.password)
+        if token is None:
+            self._authentication.throttle.record_failure(client_address)
+            LOGGER.warning("Login gagal dari %s", client_address)
+            raise HTTPException(status_code=401, detail="Nama pengguna atau kata sandi salah.")
+
+        self._authentication.throttle.record_success(client_address)
+        principal = self._authentication.identify(token)
+        LOGGER.info("%s (%s) masuk dari %s", principal.username, principal.role, client_address)
+        return self._session_response(token, principal.as_dictionary())
+
+    async def post_logout(self) -> JSONResponse:
+        """End the current session."""
+        response = JSONResponse({"signed_out": True})
+        response.delete_cookie(AuthenticationService.COOKIE_NAME, path="/")
+        return response
+
+    async def get_current_user(self, request: Request) -> JSONResponse:
+        """Report who is signed in, or ``{"signed_in": false}``."""
+        principal = self._principal(request)
+        if principal is None:
+            return JSONResponse({"signed_in": False})
+        return JSONResponse({"signed_in": True, **principal.as_dictionary()})
+
+    async def get_public_overview(self) -> JSONResponse:
+        """Headline figures for the landing page: counts only, no content."""
+        statistics = DOCUMENT_CATALOGUE.collect_statistics()
+        return JSONResponse(
+            {
+                "document_count": statistics["document_count"],
+                "chunk_count": statistics["chunk_count"],
+                "folder_count": len(statistics["folders"]),
+                "total_megabytes": statistics["total_megabytes"],
+                "last_indexed_at": statistics["last_indexed_at"],
+            }
+        )
+
     # --- Interface ----------------------------------------------------------
 
-    async def serve_interface(self) -> FileResponse:
-        """Serve the single-page interface."""
-        index_file = self._settings.web_directory / "index.html"
-        if not index_file.exists():
+    def _serve_page(self, file_name: str) -> FileResponse:
+        """Serve one HTML page from the web directory."""
+        page_file = self._settings.web_directory / file_name
+        if not page_file.exists():
             raise HTTPException(status_code=500, detail="Berkas antarmuka tidak ditemukan")
         # Revalidated for the same reason as the static assets: a cached page
         # would keep loading the old markup after an update.
-        return FileResponse(index_file, headers={"Cache-Control": "no-cache, must-revalidate"})
+        return FileResponse(page_file, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    async def serve_landing(self) -> FileResponse:
+        """Serve the public landing page with the sign-in form."""
+        return self._serve_page("landing.html")
+
+    async def serve_interface(self) -> FileResponse:
+        """Serve the single-page interface; the middleware has checked the session."""
+        return self._serve_page("index.html")
 
     # --- Status -------------------------------------------------------------
 
@@ -376,8 +506,11 @@ class RagWebApplication:
 
     # --- Indexing -----------------------------------------------------------
 
-    async def post_ingest_start(self, payload: IngestPayload) -> JSONResponse:
+    async def post_ingest_start(self, payload: IngestPayload, request: Request) -> JSONResponse:
         """Start a background indexing run, refusing if one is already active."""
+        principal = self._principal(request)
+        if principal is None or not principal.is_admin:
+            raise HTTPException(status_code=403, detail=self.ADMIN_ONLY_MESSAGE)
         if not Path(self._settings.source_directory).exists():
             raise HTTPException(
                 status_code=400,

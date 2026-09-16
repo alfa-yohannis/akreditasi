@@ -41,7 +41,7 @@ berkas dan halaman sumbernya.
 .\run.ps1
 ```
 
-Lalu buka **http://127.0.0.1:8000**.
+Lalu buka **http://127.0.0.1:8026**.
 
 > Google Drive harus aktif sebelum `ingest`. Bila drive `G:` belum termuat,
 > proses indexing menolak berjalan — justru untuk melindungi indeks yang sudah
@@ -62,7 +62,38 @@ python main.py snapshot --http-only  # tanpa browser (lewati PDDikti & login SIN
 python main.py ask "Berapa EWMP DTPR pada TS?"
 python main.py ask "..." --folder "1. Budaya Mutu" --backend claude_cli
 python main.py status                # ukuran indeks dan kesiapan backend
+python main.py hash-password         # buat hash kata sandi admin/guest baru untuk .env
 ```
+
+---
+
+## Login dan hak akses
+
+Alamat **http://127.0.0.1:8026** membuka landing page beserta formulir masuk;
+aplikasinya sendiri ada di `/app`. Hanya ada dua peran, masing-masing dengan
+satu akun. Formulir masuknya sama; akun yang dipakai menentukan perannya.
+
+| Peran | Nama pengguna | Hak |
+|---|---|---|
+| **Admin** | `admin` | semua, termasuk **Perbarui Indeks** dan **Bangun Ulang** |
+| **Guest** | `guest` | tanya jawab, telusuri, daftar dokumen, unduh — atas data indeks yang sama |
+
+Kata sandi kedua akun dibagikan terpisah dan tidak dicantumkan di sini.
+
+Guest tetap melihat tombol Perbarui Indeks dan Bangun Ulang, tetapi saat diklik
+muncul pesan bahwa mereka tidak memiliki hak. Server juga menolak permintaan
+indexing dari guest (HTTP 403), jadi batas ini tidak bisa dilewati lewat API.
+
+- Kata sandi disimpan sebagai hash PBKDF2 (`ADMIN_PASSWORD_HASH`,
+  `GUEST_PASSWORD_HASH`), bukan teks biasa. Untuk menggantinya, jalankan
+  `python main.py hash-password` lalu salin hasilnya ke variabel yang sesuai
+  di `.env`.
+- Sesi berupa cookie HttpOnly yang ditandatangani HMAC dan berlaku 12 jam
+  (`SESSION_HOURS`). Kunci tanda tangannya disimpan di `data/session-secret.key`;
+  hapus berkas itu untuk mengeluarkan semua pengguna.
+- Lima kali salah kata sandi dari alamat yang sama mengunci login selama 60 detik.
+- Semua endpoint `/api/*` dan `/docs` wajib login, kecuali `/api/auth/*` dan
+  `/api/public/overview` (hanya jumlah dokumen, tanpa isi).
 
 ---
 
@@ -119,7 +150,7 @@ Izinkan porta lewat Windows Firewall sekali saja (**sebagai Administrator**):
 
 ```powershell
 New-NetFirewallRule -DisplayName "Akreditasi RAG" -Direction Inbound `
-  -LocalPort 8000 -Protocol TCP -Action Allow -Profile Private
+  -LocalPort 8026 -Protocol TCP -Action Allow -Profile Private
 ```
 
 **Bila memakai Mobile Hotspot komputer ini**, adaptor hotspot tidak memiliki
@@ -129,15 +160,15 @@ aturan yang mencakup profil mana pun, dibatasi pada subnet hotspot saja:
 
 ```powershell
 New-NetFirewallRule -DisplayName "Akreditasi RAG (hotspot)" -Direction Inbound `
-  -LocalPort 8000 -Protocol TCP -Action Allow -Profile Any `
+  -LocalPort 8026 -Protocol TCP -Action Allow -Profile Any `
   -RemoteAddress 192.168.137.0/24
 ```
 
-Klien hotspot membuka **http://192.168.137.1:8000** — yaitu alamat komputer ini
+Klien hotspot membuka **http://192.168.137.1:8026** — yaitu alamat komputer ini
 *pada jaringan hotspot*, bukan alamat Ethernet-nya yang berada di subnet berbeda.
 
-> **Tidak ada autentikasi.** Siapa pun di jaringan yang dapat menjangkau
-> komputer ini akan dapat membaca seluruh dokumen terindeks.
+> **Setiap pengunjung wajib login.** Namun siapa pun yang memegang kata sandi
+> `guest` dapat membaca seluruh dokumen terindeks — bagikan hanya ke tim.
 
 ---
 
@@ -416,5 +447,6 @@ Contoh konfigurasi lengkap ada di [`.env.example`](.env.example).
 - **`.env` dapat memuat kredensial** (mis. akun SINTA) dan sudah dikecualikan
   oleh `.gitignore`. Jangan menyimpan kata sandi dalam teks biasa bila dapat
   dihindari.
-- **Tidak ada autentikasi pada server.** Bila `HOST=0.0.0.0`, seluruh dokumen
-  terindeks dapat dibaca siapa pun di jaringan yang sama.
+- **Login hanya membedakan dua akun bersama.** Bila `HOST=0.0.0.0`, seluruh
+  dokumen terindeks dapat dibaca siapa pun di jaringan yang memegang kata sandi
+  `guest`. Tidak ada akun per orang maupun catatan siapa bertanya apa.

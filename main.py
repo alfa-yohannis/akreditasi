@@ -1,11 +1,12 @@
 """Command-line entry point for the Akreditasi RAG system.
 
-Four subcommands, all sharing the same application objects:
+Subcommands, all sharing the same application objects:
 
     python main.py serve              start the web interface (default)
     python main.py ingest [--rebuild] build or refresh the index
     python main.py ask "pertanyaan"   answer one question in the terminal
     python main.py status             print index and backend status
+    python main.py hash-password      hash a new admin or guest password for .env
 
 Running the indexer from the terminal is useful for the first, longest pass:
 it prints per-document progress and is unaffected by a browser tab closing.
@@ -76,6 +77,9 @@ class CommandLineInterface:
         )
 
         subparsers.add_parser("status", help="Tampilkan ringkasan indeks dan backend")
+        subparsers.add_parser(
+            "hash-password", help="Buat hash kata sandi untuk ADMIN_ atau GUEST_PASSWORD_HASH"
+        )
 
     def run(self, arguments: list[str]) -> int:
         """Execute the requested command and return a process exit code."""
@@ -90,8 +94,23 @@ class CommandLineInterface:
             "ask": self._run_ask,
             "status": self._run_status,
             "snapshot": self._run_snapshot,
+            "hash-password": self._run_hash_password,
         }
         return handlers[command](parsed)
+
+    def _run_hash_password(self, _parsed: argparse.Namespace) -> int:
+        """Prompt for a password twice and print its hash for `.env`."""
+        import getpass
+
+        from app.authentication import PasswordHasher
+
+        password = getpass.getpass("Kata sandi baru   : ")
+        if not password or password != getpass.getpass("Ulangi kata sandi : "):
+            print("Kata sandi kosong atau tidak sama.", file=sys.stderr)
+            return 1
+        print(f"\n{PasswordHasher().hash(password)}")
+        print("\nSalin ke .env sebagai ADMIN_PASSWORD_HASH=... atau GUEST_PASSWORD_HASH=...")
+        return 0
 
     def _run_snapshot(self, parsed: argparse.Namespace) -> int:
         """Snapshot the external pages the corpus references, then index them."""
@@ -171,9 +190,9 @@ class CommandLineInterface:
             if others:
                 print(f"  Alamat lain (adapter virtual/VPN): {', '.join(others)}")
             print(
-                "\n  PERHATIAN: server terbuka ke jaringan tanpa autentikasi.\n"
-                "  Siapa pun yang dapat menjangkau komputer ini bisa membaca\n"
-                "  seluruh dokumen akreditasi yang terindeks.\n"
+                "\n  PERHATIAN: server terbuka ke jaringan. Siapa pun yang memegang\n"
+                "  kata sandi guest bisa membaca seluruh dokumen akreditasi yang\n"
+                "  terindeks. Jangan sebarkan kata sandi itu di luar tim.\n"
                 "  Izinkan lewat firewall dengan (jalankan sebagai Administrator):\n"
                 f"    New-NetFirewallRule -DisplayName 'Akreditasi RAG' "
                 f"-Direction Inbound -LocalPort {port} -Protocol TCP -Action Allow -Profile Private"

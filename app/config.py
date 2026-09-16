@@ -361,9 +361,30 @@ class Settings:
         # --- Web server -----------------------------------------------------
         #: Loopback by default; the corpus is internal material.
         self.server_host: str = reader.text("HOST", "127.0.0.1")
-        self.server_port: int = reader.integer("PORT", 8000)
+        self.server_port: int = reader.integer("PORT", 8026)
         #: Lets the browser ask the local server to open a cited file natively.
         self.file_opening_enabled: bool = reader.flag("ALLOW_OPEN_FILE", True)
+
+        # --- Sign-in ----------------------------------------------------------
+        # One account per role. Passwords are stored only as PBKDF2 hashes;
+        # generate a new one with `python main.py hash-password`.
+        self.admin_username: str = reader.text("ADMIN_USERNAME", "admin")
+        self.admin_password_hash: str = reader.text(
+            "ADMIN_PASSWORD_HASH",
+            "pbkdf2_sha256$600000$ec9fc80d6e7d1eb87c4f30113a757425"
+            "$e746f7893455bc15a14bf69650e19969d1d8af1ad1f01aa9f0fd82ecbb558053",
+        )
+        self.guest_username: str = reader.text("GUEST_USERNAME", "guest")
+        self.guest_password_hash: str = reader.text(
+            "GUEST_PASSWORD_HASH",
+            "pbkdf2_sha256$600000$4ee3b06adeedf63cb957c26f9b2b1b4d"
+            "$bcbd20e52e300d33c039333e971d7542b74a5bbdecbc618c21feb55093d9a8e1",
+        )
+        #: Key that signs session cookies. Blank means a random key persisted
+        #: under the data directory, which is right for a single server.
+        self.session_secret: str = reader.text("SESSION_SECRET", "")
+        #: How long a sign-in lasts.
+        self.session_lifetime_hours: int = reader.integer("SESSION_HOURS", 12)
 
     # --- Derived paths ------------------------------------------------------
 
