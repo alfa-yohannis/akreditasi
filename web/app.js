@@ -605,8 +605,11 @@ class StatusPanel {
       : `Akses: jaringan (${client ? client.address : '?'}) — dokumen tersedia lewat Unduh`;
   }
 
-  /** Paints the corpus location and read-only assurance. */
+  /** Paints the corpus location and read-only assurance (admins only). */
   #renderSource(source) {
+    // The server withholds the corpus location from guests.
+    document.getElementById('panel-source').classList.toggle('hidden', !source);
+    if (!source) return;
     const pathElement = document.getElementById('source-path');
     pathElement.textContent = source.directory;
     if (!source.exists) {

@@ -361,15 +361,22 @@ class RagWebApplication:
         """Report index size, hardware, backend availability and corpus settings."""
         index_statistics = DOCUMENT_CATALOGUE.collect_statistics()
         ocr_recogniser = EXTRACTOR_REGISTRY.ocr_recogniser
+        principal = self._principal(request)
+
+        # Where the corpus lives on this machine is operator detail; guests get
+        # null, so hiding the panel is not merely cosmetic.
+        source = None
+        if principal is not None and principal.is_admin:
+            source = {
+                "directory": str(self._settings.source_directory),
+                "exists": Path(self._settings.source_directory).exists(),
+                "access_mode": "baca-saja (read-only)",
+                "excluded_directories": sorted(self._settings.excluded_directories),
+            }
 
         return JSONResponse(
             {
-                "source": {
-                    "directory": str(self._settings.source_directory),
-                    "exists": Path(self._settings.source_directory).exists(),
-                    "access_mode": "baca-saja (read-only)",
-                    "excluded_directories": sorted(self._settings.excluded_directories),
-                },
+                "source": source,
                 "index": index_statistics,
                 "vector_index": {
                     "vector_count": VECTOR_INDEX.size,
