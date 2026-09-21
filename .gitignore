@@ -72,3 +72,10 @@ ehthumbs.db
 desktop.ini
 $RECYCLE.BIN/
 .DS_Store
+
+# --- Artefak build LaTeX (publications/paper) ---------------------------------
+*.aux
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
