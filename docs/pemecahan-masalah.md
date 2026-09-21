@@ -174,6 +174,27 @@ Memang demikian. Codex melaporkan jawabannya dalam satu peristiwa
 Berkas statis tidak termuat. Pastikan direktori `web\` berisi `index.html`,
 `app.js`, dan `styles.css`, lalu muat ulang dengan `Ctrl+F5`.
 
+### Di ponsel, sumber muncul lalu jawaban gagal dengan "network error"
+
+Gejala versi lama: koneksi putus di tengah jeda sebelum jawaban mengalir,
+biasanya karena layar terkunci atau aplikasi lain dibuka, dan jawabannya hilang.
+Versi sekarang menyambung kembali dengan sendirinya dan menampilkan *"Koneksi
+terputus — menyambung kembali"* selama menunggu. Bila pesan lama masih muncul,
+peramban memakai `app.js` lama: muat ulang halaman.
+
+Bila yang muncul *"Jawaban ini tidak lagi tersedia di server"*, server dimulai
+ulang saat jawaban dibuat; ajukan pertanyaan kembali. Bila *"tidak dapat
+disambung kembali"*, jaringan terputus terlalu lama — jawabannya tetap
+diselesaikan server dan dapat dibuka dari panel **Percakapan**.
+
+### Di desktop tampilannya seperti ponsel
+
+Tata letak ponsel dipakai bila lebar jendela 960 px atau kurang, dihitung dalam
+piksel CSS — setelah skala tampilan Windows dan zoom peramban. Jendela yang
+tidak dimaksimalkan pada skala 125% mudah berada di bawah batas itu.
+Maksimalkan jendela atau kurangi zoom (`Ctrl+0`). Bila baru saja memperbarui
+aplikasi, muat ulang dengan `Ctrl+F5` agar `styles.css` terbaru terpakai.
+
 ### Tombol "Buka dokumen" tidak berfungsi
 
 - Setel `ALLOW_OPEN_FILE=1` pada `.env`.

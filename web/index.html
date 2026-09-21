@@ -2,19 +2,25 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- `interactive-widget` makes Chrome on Android shrink the page when the
+       on-screen keyboard opens, so the question box stays above it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>Akreditasi RAG — MTI 2026</title>
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
 </head>
 <body>
-  <div class="layout">
+  <div class="layout" id="layout">
 
     <!-- ============================ SIDEBAR ============================ -->
-    <aside class="sidebar">
+    <!-- A collapsible column on wide screens, a drawer on phones; the burger
+         button in the tab bar drives both (SidebarController in app.js). -->
+    <aside class="sidebar" id="sidebar">
       <header class="sidebar-header">
         <h1>Akreditasi RAG</h1>
         <p class="subtitle">Magister Teknik Informatika &middot; LAM INFOKOM 2026</p>
+        <button class="sidebar-close" id="button-sidebar-close" type="button"
+                aria-label="Tutup panel samping" title="Tutup panel samping">✕</button>
       </header>
 
       <div class="account-bar" id="account-bar">
@@ -93,7 +99,7 @@
         <input type="range" id="input-passages" class="slider" min="3" max="15" value="6">
       </section>
 
-      <section class="panel">
+      <section class="panel hidden" id="panel-device" data-admin-only>
         <h2>Perangkat</h2>
         <div class="muted-line" id="hardware-line">–</div>
         <div class="muted-line" id="embedding-line">–</div>
@@ -103,12 +109,23 @@
       </section>
     </aside>
 
+    <!-- Dims the conversation behind the open drawer on a phone; tap to close. -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
+
     <!-- ============================= MAIN ============================= -->
     <main class="main">
       <nav class="tabs">
+        <button class="sidebar-toggle" id="button-sidebar-toggle" type="button"
+                aria-controls="sidebar" aria-expanded="true"
+                aria-label="Sembunyikan panel samping" title="Sembunyikan panel samping">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 6.5h16M4 12h16M4 17.5h16" />
+          </svg>
+        </button>
         <button class="tab active" data-tab="ask">Tanya Jawab</button>
-        <button class="tab" data-tab="browse">Telusuri Potongan</button>
-        <button class="tab" data-tab="documents">Daftar Dokumen</button>
+        <!-- Administrators only: hidden until the account is known. -->
+        <button class="tab hidden" data-tab="browse" data-admin-only>Telusuri Potongan</button>
+        <button class="tab hidden" data-tab="documents" data-admin-only>Daftar Dokumen</button>
         <a class="tab-link" href="/docs" target="_blank" rel="noopener noreferrer"
            title="Dokumentasi REST API (Swagger UI) — terbuka di tab baru">Dokumentasi API ↗</a>
       </nav>

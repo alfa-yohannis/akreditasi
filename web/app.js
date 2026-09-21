@@ -6,7 +6,12 @@
      SessionGuard           returns to the landing page when a session ends
      ApiClient              HTTP access, the only place fetch() is called
      AccountBar             signed-in user, role badge and sign-out
+     RoleBasedVisibility    hides administrator-only parts from guests
+     SidebarController      burger button: collapsible column or mobile drawer
      ServerSentEventReader  turns a streaming response into typed events
+     StreamStallWatchdog    abandons a stream that has silently died
+     ReconnectPause         waits before reconnecting, sensibly on mobile
+     AnswerStreamFollower   follows one answer, resuming after a dropped link
      Toast                  transient notifications
      StatusPanel            sidebar system status
      IngestPanel            index-building controls and progress polling
@@ -235,9 +240,43 @@ class ApiClient {
       body: JSON.stringify(payload),
       signal: abortSignal,
     });
+    return this.#requireStream(response);
+  }
+
+  /** Reopens an answer's stream, continuing after the last event received. */
+  async openAnswerEvents(answerId, afterEventNumber, abortSignal) {
+    const response = await fetch(
+      `/api/answers/${encodeURIComponent(answerId)}/events?after=${afterEventNumber}`,
+      { signal: abortSignal, cache: 'no-store' }
+    );
+    return this.#requireStream(response);
+  }
+
+  /**
+   * Asks the server to stop generating an answer.
+   *
+   * Needed because generation no longer ends when the connection does.
+   * Failure is reported rather than thrown: the reader has already stopped
+   * listening, so there is nothing further to do about it.
+   */
+  async cancelAnswer(answerId) {
+    try {
+      const response = await fetch(`/api/answers/${encodeURIComponent(answerId)}/cancel`, {
+        method: 'POST',
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Returns a streaming response, or throws an error carrying its HTTP status. */
+  #requireStream(response) {
     if (response.status === 401) SessionGuard.redirectToSignIn();
     if (!response.ok) {
-      throw new Error(`Server menolak permintaan (HTTP ${response.status})`);
+      const error = new Error(`Server menolak permintaan (HTTP ${response.status})`);
+      error.status = response.status;
+      throw error;
     }
     return response;
   }
@@ -311,50 +350,312 @@ class ApiClient {
   }
 }
 
-/** Decodes a Server-Sent Events body into `{name, payload}` objects. */
+/** Decodes a Server-Sent Events body into `{name, payload, id}` objects. */
 class ServerSentEventReader {
   /**
-   * Reads `response` to completion, invoking `handler` per event.
+   * Reads `response` until it ends, invoking `handler` per event.
+   *
    * Frames are separated by a blank line; partial frames are buffered until
-   * the terminating newline pair arrives.
+   * the terminating newline pair arrives. Keep-alive comments carry no data
+   * and are dropped here, but they still count as signs of life for the
+   * watchdog. Returning normally does not mean the answer is complete — a
+   * stalled or closed connection ends the read too, and the caller decides.
    */
   async readAll(response, handler) {
     const reader = response.body.getReader();
+    const watchdog = new StreamStallWatchdog(reader);
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    watchdog.start();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        watchdog.recordActivity();
+        buffer += decoder.decode(value, { stream: true });
 
-      let separatorIndex = buffer.indexOf('\n\n');
-      while (separatorIndex !== -1) {
-        const frame = buffer.slice(0, separatorIndex);
-        buffer = buffer.slice(separatorIndex + 2);
-        const event = this.#parseFrame(frame);
-        if (event) handler(event);
-        separatorIndex = buffer.indexOf('\n\n');
+        let separatorIndex = buffer.indexOf('\n\n');
+        while (separatorIndex !== -1) {
+          const frame = buffer.slice(0, separatorIndex);
+          buffer = buffer.slice(separatorIndex + 2);
+          const event = this.#parseFrame(frame);
+          if (event) handler(event);
+          separatorIndex = buffer.indexOf('\n\n');
+        }
       }
+    } finally {
+      watchdog.stop();
     }
   }
 
-  /** Turns one raw frame into a typed event, or null when unparsable. */
+  /** Turns one raw frame into a typed event, or null for comments and junk. */
   #parseFrame(frame) {
     let eventName = 'message';
+    let eventNumber = null;
     const dataLines = [];
 
     for (const line of frame.split('\n')) {
       if (line.startsWith('event:')) eventName = line.slice(6).trim();
       else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      else if (line.startsWith('id:')) eventNumber = Number(line.slice(3).trim());
     }
     if (dataLines.length === 0) return null;
 
     try {
-      return { name: eventName, payload: JSON.parse(dataLines.join('\n')) };
+      return {
+        name: eventName,
+        payload: JSON.parse(dataLines.join('\n')),
+        id: Number.isFinite(eventNumber) ? eventNumber : null,
+      };
     } catch {
       return null;
     }
+  }
+}
+
+/**
+ * Cancels a stream read that has gone silent for too long.
+ *
+ * The server sends a keep-alive at least every ten seconds, so a much longer
+ * silence means the connection died without closing — typical when a phone
+ * switches network or wakes from sleep. Left alone, the read would wait for
+ * minutes; cancelling it ends the read so the answer can be resumed instead.
+ */
+class StreamStallWatchdog {
+  /** Silence tolerated before the connection is presumed dead. */
+  static STALL_MILLISECONDS = 35000;
+
+  /** Silence that, found on returning to the page, already means a dead link. */
+  static SUSPECT_ON_RETURN_MILLISECONDS = 15000;
+
+  constructor(streamReader) {
+    this.streamReader = streamReader;
+    this.timer = null;
+    this.lastActivityAt = Date.now();
+    this.handleStall = this.handleStall.bind(this);
+    this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+  }
+
+  /** Begins watching the stream. */
+  start() {
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    this.recordActivity();
+  }
+
+  /** Notes that data arrived, restarting the silence countdown. */
+  recordActivity() {
+    this.lastActivityAt = Date.now();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(this.handleStall, StreamStallWatchdog.STALL_MILLISECONDS);
+  }
+
+  /** Stops watching; called once the read has ended either way. */
+  stop() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  /**
+   * Checks the stream as the reader returns to the page.
+   *
+   * A phone suspends the network while its screen is off, and the connection
+   * rarely survives. When nothing has arrived for longer than the keep-alive
+   * interval, sitting out the full stall timeout would only delay the resume.
+   */
+  handleVisibilityChange() {
+    if (document.visibilityState !== 'visible') return;
+    const silence = Date.now() - this.lastActivityAt;
+    if (silence > StreamStallWatchdog.SUSPECT_ON_RETURN_MILLISECONDS) this.handleStall();
+  }
+
+  /** Abandons the silent read, which makes the pending read() finish. */
+  handleStall() {
+    this.stop();
+    this.streamReader.cancel().catch(StreamStallWatchdog.ignoreFailure);
+  }
+
+  /** Rejection handler for a cancel whose failure changes nothing. */
+  static ignoreFailure() {}
+}
+
+/**
+ * A pause before reconnecting that ends as soon as retrying makes sense.
+ *
+ * While the page is hidden — screen locked, another app in front — a mobile
+ * browser suspends the network, so attempts made then are wasted. The pause
+ * therefore outlasts its delay until the page is visible again, and returning
+ * to the page, or the network coming back, ends it at once.
+ */
+class ReconnectPause {
+  constructor(delayMilliseconds, abortSignal) {
+    this.delayMilliseconds = delayMilliseconds;
+    this.abortSignal = abortSignal;
+    this.timer = null;
+    this.isSettled = false;
+    this.resolvePause = null;
+    this.rejectPause = null;
+    this.handleElapsed = this.handleElapsed.bind(this);
+    this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+    this.handleOnline = this.handleOnline.bind(this);
+    this.handleAbort = this.handleAbort.bind(this);
+  }
+
+  /** Resolves when it is time to retry; rejects with an AbortError if stopped. */
+  wait() {
+    return new Promise(this.#begin.bind(this));
+  }
+
+  /** Arms the timer and the listeners that can end the pause early. */
+  #begin(resolve, reject) {
+    this.resolvePause = resolve;
+    this.rejectPause = reject;
+    if (this.abortSignal.aborted) {
+      this.handleAbort();
+      return;
+    }
+    this.timer = setTimeout(this.handleElapsed, this.delayMilliseconds);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    window.addEventListener('online', this.handleOnline);
+    this.abortSignal.addEventListener('abort', this.handleAbort);
+  }
+
+  /** The delay is over: retry now, or keep waiting until the page is visible. */
+  handleElapsed() {
+    this.timer = null;
+    if (document.visibilityState !== 'hidden') this.#settle(true);
+  }
+
+  /** The reader has come back to the page: retry immediately. */
+  handleVisibilityChange() {
+    if (document.visibilityState === 'visible') this.#settle(true);
+  }
+
+  /** The network is back: retry immediately if the page is in view. */
+  handleOnline() {
+    if (document.visibilityState !== 'hidden') this.#settle(true);
+  }
+
+  /** The reader pressed stop while waiting. */
+  handleAbort() {
+    this.#settle(false);
+  }
+
+  /** Ends the pause exactly once, removing every listener it added. */
+  #settle(shouldRetry) {
+    if (this.isSettled) return;
+    this.isSettled = true;
+    if (this.timer) clearTimeout(this.timer);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    window.removeEventListener('online', this.handleOnline);
+    this.abortSignal.removeEventListener('abort', this.handleAbort);
+    if (shouldRetry) this.resolvePause();
+    else this.rejectPause(new DOMException('Dihentikan oleh pengguna.', 'AbortError'));
+  }
+}
+
+/** A failure to follow an answer whose message is complete as it stands. */
+class AnswerStreamError extends Error {}
+
+/**
+ * Follows one answer from question to `done`, reconnecting whenever needed.
+ *
+ * The server generates each answer independently of the connection that asked
+ * for it and numbers every event. When the connection drops — which on a
+ * phone happens simply by locking the screen during a long answer — this class
+ * reconnects and requests only the events after the last one it received, so
+ * the text carries on exactly where it stopped instead of failing with
+ * "network error".
+ */
+class AnswerStreamFollower {
+  /** Waits between consecutive attempts; the last value repeats. */
+  static RETRY_DELAYS_MILLISECONDS = [1000, 2000, 4000, 8000, 15000];
+
+  /** Attempts in a row that bring no new events before giving up. */
+  static MAXIMUM_FUTILE_ATTEMPTS = 8;
+
+  /**
+   * `callbacks.onEvent(event)` receives every answer event;
+   * `callbacks.onReconnecting()` and `callbacks.onReconnected()` bracket each
+   * period without a connection, so the view can say what is happening.
+   */
+  constructor(apiClient, eventReader, callbacks) {
+    this.api = apiClient;
+    this.eventReader = eventReader;
+    this.callbacks = callbacks;
+    //: Known once the server has accepted the question; needed to resume.
+    this.answerId = null;
+    this.lastEventNumber = 0;
+    this.hasFinished = false;
+    this.handleFrame = this.handleFrame.bind(this);
+  }
+
+  /** Asks the question, then follows the answer until it is complete. */
+  async follow(payload, abortSignal) {
+    try {
+      const response = await this.api.openAnswerStream(payload, abortSignal);
+      await this.eventReader.readAll(response, this.handleFrame);
+    } catch (error) {
+      // Without an answer identifier there is nothing to resume.
+      if (error.name === 'AbortError' || !this.answerId) throw error;
+    }
+    if (!this.hasFinished && !this.answerId) {
+      throw new Error('koneksi terputus sebelum server menerima pertanyaan');
+    }
+    await this.#resumeUntilFinished(abortSignal);
+  }
+
+  /** Records the stream position, then passes answer events on. */
+  handleFrame(event) {
+    if (event.name === 'accepted') {
+      this.answerId = event.payload.answer_id;
+      return;
+    }
+    if (event.id !== null) this.lastEventNumber = event.id;
+    if (event.name === 'done') this.hasFinished = true;
+    this.callbacks.onEvent(event);
+  }
+
+  /** Reconnects until `done` arrives, giving up only after repeated futility. */
+  async #resumeUntilFinished(abortSignal) {
+    let futileAttempts = 0;
+    while (!this.hasFinished) {
+      if (futileAttempts >= AnswerStreamFollower.MAXIMUM_FUTILE_ATTEMPTS) {
+        throw new AnswerStreamError(
+          'Koneksi ke server terputus dan tidak dapat disambung kembali. ' +
+          'Server tetap menyelesaikan jawabannya; buka kembali percakapan ini ' +
+          'dari panel Percakapan untuk melihatnya.'
+        );
+      }
+
+      this.callbacks.onReconnecting();
+      await new ReconnectPause(this.#retryDelay(futileAttempts), abortSignal).wait();
+
+      const lastEventNumberBefore = this.lastEventNumber;
+      try {
+        const response = await this.api.openAnswerEvents(
+          this.answerId, this.lastEventNumber, abortSignal
+        );
+        this.callbacks.onReconnected();
+        await this.eventReader.readAll(response, this.handleFrame);
+      } catch (error) {
+        if (error.name === 'AbortError') throw error;
+        if (error.status === 404) {
+          throw new AnswerStreamError(
+            'Jawaban ini tidak lagi tersedia di server — kemungkinan server baru ' +
+            'saja dimulai ulang. Silakan ajukan pertanyaan kembali.'
+          );
+        }
+      }
+      futileAttempts = this.lastEventNumber > lastEventNumberBefore ? 0 : futileAttempts + 1;
+    }
+  }
+
+  /** The wait before attempt number `futileAttempts + 1`. */
+  #retryDelay(futileAttempts) {
+    const delays = AnswerStreamFollower.RETRY_DELAYS_MILLISECONDS;
+    return delays[Math.min(futileAttempts, delays.length - 1)];
   }
 }
 
@@ -929,6 +1230,7 @@ class AnswerRenderer {
     this.markdown = new MarkdownRenderer();
     this.citationLinker = new CitationLinker();
     this.accumulatedText = '';
+    this.statusMessage = '';
     this.citationCardsByNumber = new Map();
 
     this.container.innerHTML =
@@ -950,8 +1252,32 @@ class AnswerRenderer {
 
   /** Replaces the status line's text while keeping the spinner. */
   setStatusMessage(message) {
+    this.statusMessage = message;
+    this.#writeStatusLabel(message);
+  }
+
+  /**
+   * Says the connection dropped and is being restored.
+   *
+   * Temporary by design: the previous status message is kept and put back by
+   * `clearConnectionNotice`, so the line does not go on claiming a problem
+   * after the answer has resumed.
+   */
+  showConnectionNotice() {
+    this.statusElement.classList.add('reconnecting');
+    this.#writeStatusLabel('Koneksi terputus — menyambung kembali; jawaban tetap diproses di server…');
+  }
+
+  /** Restores the status line once the connection is back. */
+  clearConnectionNotice() {
+    this.statusElement.classList.remove('reconnecting');
+    this.#writeStatusLabel(this.statusMessage || 'Mencari dokumen relevan…');
+  }
+
+  /** Writes the status line's text, if the line is still on screen. */
+  #writeStatusLabel(text) {
     const label = this.statusElement.querySelector('span:last-child');
-    if (label) label.textContent = message;
+    if (label) label.textContent = text;
   }
 
   /**
@@ -1171,6 +1497,8 @@ class ConversationView {
     this.citationLinker = new CitationLinker();
     this.formatter = new ValueFormatter();
     this.abortController = null;
+    //: Follows the answer being generated; null while idle.
+    this.streamFollower = null;
     //: Conversation currently being added to; null means nothing is saved.
     this.sessionId = null;
     //: Raised after a turn completes so the sidebar can refresh its list.
@@ -1180,6 +1508,12 @@ class ConversationView {
     this.inputElement = document.getElementById('input-question');
     this.sendButton = document.getElementById('button-send');
     this.stopButton = document.getElementById('button-stop');
+
+    // The keyboard hint means nothing on a touch keyboard, and on a phone the
+    // full placeholder wraps and is cut off inside the one-line box.
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      this.inputElement.placeholder = 'Tulis pertanyaan…';
+    }
 
     this.toolbarElement = document.getElementById('conversation-toolbar');
     document.getElementById('button-expand-sources')
@@ -1218,9 +1552,18 @@ class ConversationView {
     this.inputElement.style.height = `${this.inputElement.scrollHeight}px`;
   }
 
-  /** Aborts an in-flight answer. */
+  /**
+   * Stops an in-flight answer.
+   *
+   * Closing the connection is not enough on its own: the server deliberately
+   * keeps generating when a connection drops, so that a phone can resume. It
+   * is therefore told explicitly that this answer is no longer wanted.
+   */
   handleStop() {
-    if (this.abortController) this.abortController.abort();
+    if (!this.abortController) return;
+    const answerId = this.streamFollower ? this.streamFollower.answerId : null;
+    if (answerId) this.api.cancelAnswer(answerId);
+    this.abortController.abort();
   }
 
   /** Opens every source panel in the thread. */
@@ -1281,8 +1624,11 @@ class ConversationView {
     }
 
     this.abortController = new AbortController();
+    this.streamFollower = new AnswerStreamFollower(
+      this.api, this.eventReader, this.#buildStreamCallbacks(renderer)
+    );
     try {
-      const response = await this.api.openAnswerStream(
+      await this.streamFollower.follow(
         {
           question,
           folder_filter: this.settings.folderFilter() || null,
@@ -1292,17 +1638,18 @@ class ConversationView {
         },
         this.abortController.signal
       );
-      await this.eventReader.readAll(response, this.#buildEventHandler(renderer));
     } catch (error) {
       if (error.name === 'AbortError') {
         renderer.renderError('Dihentikan oleh pengguna.');
-        renderer.finish({ elapsed_seconds: 0 });
+      } else if (error instanceof AnswerStreamError) {
+        renderer.renderError(error.message);
       } else {
         renderer.renderError(`Gagal menghubungi server: ${error.message}`);
-        renderer.finish({ elapsed_seconds: 0 });
       }
+      renderer.finish({ elapsed_seconds: 0 });
     } finally {
       this.abortController = null;
+      this.streamFollower = null;
       this.#setBusy(false);
       this.#scrollToBottom();
       this.#refreshToolbarVisibility();
@@ -1358,6 +1705,15 @@ class ConversationView {
         model_name: turn.model_name,
       },
     });
+  }
+
+  /** Connects a stream follower's notifications to one answer's renderer. */
+  #buildStreamCallbacks(renderer) {
+    return {
+      onEvent: this.#buildEventHandler(renderer),
+      onReconnecting: renderer.showConnectionNotice.bind(renderer),
+      onReconnected: renderer.clearConnectionNotice.bind(renderer),
+    };
   }
 
   /** Returns a handler that forwards events and keeps the view scrolled. */
@@ -1710,6 +2066,131 @@ class AccountBar {
   }
 }
 
+/**
+ * Hides the parts of the interface that only administrators use.
+ *
+ * Elements marked `data-admin-only` start hidden in the markup and are revealed
+ * once the account is known to be an administrator, so a guest never sees
+ * them appear and disappear while the page loads.
+ */
+class RoleBasedVisibility {
+  /** Shows every administrator-only element to admins; hides it from guests. */
+  apply(isAdmin) {
+    for (const element of document.querySelectorAll('[data-admin-only]')) {
+      element.classList.toggle('hidden', !isAdmin);
+    }
+  }
+}
+
+/**
+ * The burger button: shows and hides the sidebar so the conversation and the
+ * question box can use the whole screen.
+ *
+ * One control, two behaviours, split at the same width as the stylesheet. On a
+ * wide screen the sidebar is a column that collapses away, and the choice is
+ * remembered. On a phone it is a drawer over the conversation, closed by
+ * default — left in the page it would push the question box half a screen down.
+ */
+class SidebarController {
+  /** Must match the breakpoint in styles.css. */
+  static NARROW_SCREEN_QUERY = '(max-width: 960px)';
+
+  /** Browser-storage key for the wide-screen collapsed preference. */
+  static STORAGE_KEY = 'akreditasi-rag.sidebar-collapsed';
+
+  constructor() {
+    this.layout = document.getElementById('layout');
+    this.toggleButton = document.getElementById('button-sidebar-toggle');
+    this.narrowScreen = window.matchMedia(SidebarController.NARROW_SCREEN_QUERY);
+
+    this.toggleButton.addEventListener('click', this.handleToggle.bind(this));
+    document.getElementById('button-sidebar-close')
+      .addEventListener('click', this.handleClose.bind(this));
+    document.getElementById('sidebar-backdrop')
+      .addEventListener('click', this.handleClose.bind(this));
+    document.addEventListener('keydown', this.handleKeyDown.bind(this));
+    this.narrowScreen.addEventListener('change', this.handleScreenWidthChange.bind(this));
+
+    // The remembered state is applied without animation: sliding shut on every
+    // page load would look like a glitch, not a preference. Reading
+    // offsetWidth commits the state before transitions are switched back on.
+    this.layout.classList.add('sidebar-instant');
+    this.layout.classList.toggle('sidebar-collapsed', this.#readCollapsedPreference());
+    void this.layout.offsetWidth;
+    this.layout.classList.remove('sidebar-instant');
+    this.#refreshToggleState();
+  }
+
+  /** Opens or closes the drawer on a phone; collapses or expands the column otherwise. */
+  handleToggle() {
+    if (this.narrowScreen.matches) {
+      this.layout.classList.toggle('sidebar-open');
+    } else {
+      const isCollapsed = this.layout.classList.toggle('sidebar-collapsed');
+      this.#writeCollapsedPreference(isCollapsed);
+    }
+    this.#refreshToggleState();
+  }
+
+  /** Closes the drawer from its own close button or the dimmed backdrop. */
+  handleClose() {
+    this.closeDrawer();
+  }
+
+  /** Escape closes an open drawer, as it would any overlay. */
+  handleKeyDown(keyEvent) {
+    if (keyEvent.key === 'Escape' && this.layout.classList.contains('sidebar-open')) {
+      this.closeDrawer();
+    }
+  }
+
+  /** A drawer left open while the window widens would cover nothing; drop it. */
+  handleScreenWidthChange() {
+    this.layout.classList.remove('sidebar-open');
+    this.#refreshToggleState();
+  }
+
+  /**
+   * Closes the drawer, if one is open.
+   *
+   * Called after picking a conversation on a phone: the reader chose it in
+   * order to read it, and the drawer would otherwise still be covering it.
+   */
+  closeDrawer() {
+    this.layout.classList.remove('sidebar-open');
+    this.#refreshToggleState();
+  }
+
+  /** Mirrors whether the sidebar is showing into the button's label and state. */
+  #refreshToggleState() {
+    const isShowing = this.narrowScreen.matches
+      ? this.layout.classList.contains('sidebar-open')
+      : !this.layout.classList.contains('sidebar-collapsed');
+    const label = isShowing ? 'Sembunyikan panel samping' : 'Tampilkan panel samping';
+    this.toggleButton.setAttribute('aria-expanded', String(isShowing));
+    this.toggleButton.setAttribute('aria-label', label);
+    this.toggleButton.title = label;
+  }
+
+  /** The remembered wide-screen preference; storage can be unavailable. */
+  #readCollapsedPreference() {
+    try {
+      return window.localStorage.getItem(SidebarController.STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  /** Remembers the wide-screen preference where storage allows it. */
+  #writeCollapsedPreference(isCollapsed) {
+    try {
+      window.localStorage.setItem(SidebarController.STORAGE_KEY, isCollapsed ? '1' : '0');
+    } catch {
+      // Private browsing or blocked storage: the toggle still works this visit.
+    }
+  }
+}
+
 /** Composes every component and starts the interface. */
 class Application {
   constructor() {
@@ -1720,6 +2201,8 @@ class Application {
 
     this.clipboard = new ClipboardWriter();
     this.accountBar = new AccountBar(this.api, this.toast);
+    this.roleVisibility = new RoleBasedVisibility();
+    this.sidebar = new SidebarController();
 
     this.statusPanel = new StatusPanel(this.api, this.formatter, this.toast);
     this.ingestPanel = new IngestPanel(
@@ -1745,6 +2228,7 @@ class Application {
   /** Loads initial state and resumes any indexing run already in progress. */
   async start() {
     await this.accountBar.refresh();
+    this.roleVisibility.apply(this.accountBar.isAdmin);
     this.ingestPanel.setAdministrator(this.accountBar.isAdmin);
     const status = await this.statusPanel.refresh();
     this.documentsPanel.setLocalClient(Boolean(status && status.client && status.client.is_local));
@@ -1755,6 +2239,7 @@ class Application {
 
   /** Opens a session chosen in the sidebar, or clears the view for a new one. */
   async handleSessionOpened(sessionId, isNew) {
+    this.sidebar.closeDrawer();
     if (!sessionId) {
       this.conversation.startNewConversation(null);
       return;

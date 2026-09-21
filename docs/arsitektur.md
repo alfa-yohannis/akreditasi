@@ -71,6 +71,7 @@ balik keputusan-keputusan rancangan yang tidak langsung terlihat jelas.
 | `retrieval.py` | Pencarian hibrida dan penggabungan peringkat |
 | `language_models.py` | Backend Ollama dan tiga backend CLI agen |
 | `rag.py` | Penyusunan prompt dan aliran jawaban |
+| `answer_streams.py` | Jawaban dibuat di latar belakang; pembaca dapat menyambung kembali |
 | `server.py` | Rute HTTP dan Server-Sent Events |
 
 Ketergantungan mengalir **satu arah**, dari atas ke bawah daftar. `storage.py`
@@ -144,20 +145,55 @@ dua detik, tersembunyi di balik waktu muat model bahasa.
 ### Mengapa Server-Sent Events, bukan WebSocket?
 
 Lalu lintasnya satu arah dan berumur pendek: peramban mengirim satu pertanyaan
-lalu membaca aliran sampai selesai. SSE menempuh HTTP biasa, otomatis
-tersambung ulang, dan tidak memerlukan pembukuan koneksi. WebSocket hanya akan
-menambah kerumitan tanpa manfaat.
+lalu membaca aliran sampai selesai. SSE menempuh HTTP biasa, memiliki cara baku
+untuk melanjutkan aliran (`id` dan `Last-Event-ID`), dan tidak memerlukan
+pembukuan koneksi. WebSocket hanya akan menambah kerumitan tanpa manfaat.
 
 Sitasi dikirim **sebelum** token jawaban pertama, sehingga panel bukti dapat
 digambar selagi model masih menulis — pengguna bisa mulai memeriksa sumber saat
 bagian paling lambat dari permintaan sedang berjalan.
 
+### Mengapa jawaban tidak dibuat di dalam respons HTTP?
+
+Karena koneksi di ponsel mudah putus, dan jeda sunyi dalam satu jawaban bisa
+panjang: pencarian beberapa detik, memuat model setelah server dimulai ulang
+hampir satu menit, dan backend CLI pada effort tertinggi dapat berpikir
+bermenit-menit sebelum kata pertama. Mengunci layar atau berpindah aplikasi di
+tengah jeda itu memutus koneksi. Dulu jawaban dibuat di dalam respons, sehingga
+putusnya koneksi ikut menghentikan pembuatannya: pengguna melihat sumber, lalu
+*"network error"*, dan jawabannya tidak pernah tersimpan.
+
+Kini setiap pertanyaan menjadi satu `AnswerJob` yang berjalan di thread
+sendiri dan mencatat setiap peristiwa dengan nomor urut. Respons HTTP hanyalah
+**pembaca** catatan itu:
+
+```
+POST /api/ask                          accepted {answer_id}, lalu peristiwa #1, #2, …
+GET  /api/answers/{id}/events?after=N  peristiwa sesudah #N, lalu mengikuti yang baru
+POST /api/answers/{id}/cancel          hentikan pembuatan jawaban
+```
+
+- Selama tidak ada peristiwa baru, server mengirim komentar `: keep-alive`
+  setiap 10 detik agar koneksi tidak pernah tampak menganggur.
+- Peramban yang kehilangan koneksi — atau yang tidak menerima apa pun selama
+  35 detik, atau yang kembali ke halaman setelah lebih dari 15 detik sunyi —
+  menyambung ke `/events?after=N` dan melanjutkan tepat dari peristiwa terakhir
+  yang diterimanya. Selama halaman tersembunyi, percobaan ditunda sampai
+  halaman terlihat lagi, karena ponsel memang menangguhkan jaringan saat itu.
+- Jawaban tetap selesai dan tersimpan ke percakapan walaupun tidak ada yang
+  membaca. Justru karena itu tombol **Hentikan** kini memanggil `/cancel`:
+  menutup koneksi saja tidak lagi menghentikan server.
+- Pekerjaan yang sudah selesai disimpan 30 menit (paling banyak 50) agar
+  pembaca yang tertinggal masih dapat mengambil sisanya. Server yang dimulai
+  ulang kehilangan semuanya; peramban lalu menyarankan bertanya kembali.
+
 ### Mengapa generator sinkron di dalam server asinkron?
 
-`RagEngine.stream_answer` adalah generator biasa, bukan `async`. Starlette
-menjalankan iterator sinkron di thread pool, sehingga panggilan model yang
-memblokir tidak pernah menahan event loop — tanpa memaksa seluruh pipeline
-menjadi asinkron.
+`RagEngine.stream_answer` adalah generator biasa, bukan `async`. Generator itu
+dijalankan di thread milik `AnswerJob`, dan pembaca SSE-nya juga generator
+sinkron yang dijalankan Starlette di thread pool. Menunggu peristiwa berikutnya
+atau panggilan model yang memblokir tidak pernah menahan event loop — tanpa
+memaksa seluruh pipeline menjadi asinkron.
 
 ### Mengapa indexing inkremental?
 

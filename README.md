@@ -24,7 +24,7 @@ berkas dan halaman sumbernya.
 | **Sumber eksternal** | Salinan bertanggal SINTA (dengan login & paginasi), Google Scholar, PDDikti, dan situs kampus |
 | **Antarmuka** | Satu halaman: jawaban Markdown mengalir, sitasi dapat diklik, tautan ke sumber asli, salin ke papan klip, unduh dokumen, percakapan tersimpan |
 | **Skala saat ini** | 731 dokumen · 12.648 potongan · 138 salinan halaman eksternal |
-| **Pengujian** | 411 pengujian unit, selesai dalam ±5 detik tanpa jaringan |
+| **Pengujian** | 481 pengujian unit, selesai dalam ±15 detik tanpa jaringan |
 
 ---
 
@@ -76,13 +76,17 @@ satu akun. Formulir masuknya sama; akun yang dipakai menentukan perannya.
 | Peran | Nama pengguna | Hak |
 |---|---|---|
 | **Admin** | `admin` | semua, termasuk **Perbarui Indeks** dan **Bangun Ulang** |
-| **Guest** | `guest` | tanya jawab, telusuri, daftar dokumen, unduh — atas data indeks yang sama |
+| **Guest** | `guest` | tanya jawab dan unduh dokumen yang disitasi — atas data indeks yang sama |
 
 Kata sandi kedua akun dibagikan terpisah dan tidak dicantumkan di sini.
 
 Guest tetap melihat tombol Perbarui Indeks dan Bangun Ulang, tetapi saat diklik
 muncul pesan bahwa mereka tidak memiliki hak. Server juga menolak permintaan
 indexing dari guest (HTTP 403), jadi batas ini tidak bisa dilewati lewat API.
+
+Tab **Telusuri Potongan** dan **Daftar Dokumen**, serta panel **Perangkat**,
+disembunyikan dari guest. Penyembunyian ini hanya pada tampilan: endpoint
+`/api/search` dan `/api/documents` tetap dapat dipanggil guest secara langsung.
 
 - Kata sandi disimpan sebagai hash PBKDF2 (`ADMIN_PASSWORD_HASH`,
   `GUEST_PASSWORD_HASH`), bukan teks biasa. Untuk menggantinya, jalankan
@@ -101,6 +105,22 @@ indexing dari guest (HTTP 403), jadi batas ini tidak bisa dilewati lewat API.
 
 Tiga tab: **Tanya Jawab**, **Telusuri Potongan** (melihat hasil pencarian tanpa
 membuat jawaban — berguna memeriksa mutu retrieval), dan **Daftar Dokumen**.
+Dua tab terakhir hanya tampil untuk admin.
+
+Tombol **☰** di kiri baris tab menyembunyikan atau menampilkan panel samping,
+sehingga percakapan dan kotak pertanyaan dapat memakai seluruh lebar layar;
+pilihannya diingat peramban. Di ponsel (lebar ≤ 960 px) panel samping menjadi
+laci yang tertutup secara bawaan dan terbuka di atas percakapan.
+
+### Koneksi putus saat jawaban dibuat
+
+Jawaban dibuat di server terlepas dari koneksi yang memintanya. Bila koneksi
+terputus — layar ponsel terkunci, aplikasi lain dibuka, atau Wi-Fi berganti —
+antarmuka menampilkan *"Koneksi terputus — menyambung kembali"* lalu
+melanjutkan jawaban tepat dari bagian terakhir yang diterima, tanpa mengulang
+teks. Jawaban tetap selesai dan tersimpan ke percakapan walaupun tidak ada yang
+menunggu. Tombol **Hentikan** memberi tahu server untuk berhenti membuat
+jawaban.
 
 ### Percakapan tersimpan
 
@@ -373,13 +393,14 @@ akreditasi/
 │   ├── browser_sources.py   pembacaan lewat browser (login SINTA, PDDikti)
 │   ├── language_models.py   Ollama + tiga backend CLI agen
 │   ├── rag.py               penyusunan prompt, aliran jawaban
+│   ├── answer_streams.py    jawaban di latar belakang, lanjut setelah koneksi putus
 │   └── server.py            rute FastAPI dan SSE
 ├── web/
 │   ├── index.html           antarmuka satu halaman (tanpa proses build)
 │   ├── app.js               klien berbasis kelas
 │   ├── styles.css           tema warna Pradita
 │   └── vendor/              marked + DOMPurify, disalin lokal
-├── tests/                   411 pengujian unit
+├── tests/                   481 pengujian unit
 ├── docs/                    arsitektur, konfigurasi, operasional
 ├── corpus-lokal/            salinan lokal + halaman eksternal
 ├── data/                    dihasilkan: indeks, vektor, percakapan, cache model
@@ -397,9 +418,9 @@ akreditasi/
 .\.venv\Scripts\python.exe -m pytest tests --cov=app --cov-report=term-missing
 ```
 
-411 pengujian, tanpa akses jaringan dan tanpa mengunduh model — tahap pencarian
+481 pengujian, tanpa akses jaringan dan tanpa mengunduh model — tahap pencarian
 dan penjawaban digantikan objek tiruan, sehingga seluruh suite selesai dalam
-sekitar 5 detik.
+sekitar 15 detik.
 
 ---
 

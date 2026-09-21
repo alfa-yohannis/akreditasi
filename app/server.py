@@ -8,11 +8,14 @@ Answers are delivered as Server-Sent Events. SSE is used in preference to a
 WebSocket because the traffic is one-directional and short-lived: the browser
 posts a question and reads a stream until it closes. It also survives a proxy or
 a reload without connection bookkeeping.
+
+Generation itself runs apart from the response (see :mod:`app.answer_streams`),
+so a reader whose connection drops can resume the same answer rather than lose
+it.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
@@ -25,13 +28,14 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .answer_streams import AnswerFrameStreamer, AnswerJobRegistry, ServerSentEventEncoder
 from .authentication import AUTHENTICATION_SERVICE, AuthenticationService, Principal
 from .config import SETTINGS, Settings
 from .conversations import CONVERSATION_STORE
 from .embeddings import ComputeDeviceResolver
 from .extractors import EXTRACTOR_REGISTRY
 from .ingestion import INGESTION_RUNNER, TEXT_EMBEDDER
-from .rag import LANGUAGE_MODEL_FACTORY, QuestionRequest, RagEngine, StreamEvent
+from .rag import LANGUAGE_MODEL_FACTORY, QuestionRequest, RagEngine
 from .retrieval import CROSS_ENCODER_RERANKER, HybridRetriever
 from .safety import SOURCE_GUARD
 from .storage import DOCUMENT_CATALOGUE, VECTOR_INDEX
@@ -91,15 +95,6 @@ class FileActionPayload(BaseModel):
     action: str = Field(default="reveal", pattern="^(reveal|open)$")
 
 
-class ServerSentEventEncoder:
-    """Formats stream events as Server-Sent Event frames."""
-
-    def encode(self, event: StreamEvent) -> str:
-        """Return one SSE frame for ``event``."""
-        payload_json = json.dumps(event.payload, ensure_ascii=False)
-        return f"event: {event.name}\ndata: {payload_json}\n\n"
-
-
 class LocalFileLauncher:
     """Opens an indexed document in Explorer or its default application.
 
@@ -157,6 +152,19 @@ class RagWebApplication:
         "Anda tidak memiliki hak untuk memperbarui dan/atau membangun ulang indeks."
     )
 
+    #: Longest silence on an answer stream before a keep-alive frame is sent.
+    #: Well under the idle limits of phones and proxies, and cheap: one short
+    #: comment line per interval, only while nothing else is being sent.
+    HEARTBEAT_SECONDS = 10.0
+
+    #: Headers for every answer stream. `X-Accel-Buffering` stops a reverse
+    #: proxy such as nginx from holding frames back until the stream ends.
+    STREAM_HEADERS = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+
     def __init__(
         self,
         settings: Settings,
@@ -167,7 +175,10 @@ class RagWebApplication:
         self._authentication = authentication
         self._device_resolver = ComputeDeviceResolver()
         self._file_launcher = LocalFileLauncher(settings)
-        self._event_encoder = ServerSentEventEncoder()
+        self._answer_jobs = AnswerJobRegistry()
+        self._frame_streamer = AnswerFrameStreamer(
+            ServerSentEventEncoder(), self.HEARTBEAT_SECONDS
+        )
 
         self._retriever = HybridRetriever(
             settings=settings,
@@ -209,6 +220,12 @@ class RagWebApplication:
             methods=["GET"],
         )
         self.api.add_api_route("/api/ask", self.post_question, methods=["POST"])
+        self.api.add_api_route(
+            "/api/answers/{answer_id}/events", self.get_answer_events, methods=["GET"]
+        )
+        self.api.add_api_route(
+            "/api/answers/{answer_id}/cancel", self.post_answer_cancel, methods=["POST"]
+        )
         self.api.add_api_route("/api/search", self.post_search, methods=["POST"])
         self.api.add_api_route("/api/ingest/start", self.post_ingest_start, methods=["POST"])
         self.api.add_api_route("/api/ingest/status", self.get_ingest_status, methods=["GET"])
@@ -455,7 +472,12 @@ class RagWebApplication:
     # --- Question answering -------------------------------------------------
 
     async def post_question(self, payload: AskPayload) -> StreamingResponse:
-        """Answer a question, streaming citations then text as SSE."""
+        """Answer a question, streaming citations then text as SSE.
+
+        The first frame, ``accepted``, carries the answer's identifier. Every
+        later frame is numbered, so a reader that loses the connection can pick
+        up from ``/api/answers/{answer_id}/events`` where it left off.
+        """
         request = QuestionRequest(
             question=payload.question.strip(),
             folder_filter=payload.folder_filter or None,
@@ -463,25 +485,49 @@ class RagWebApplication:
             passage_count=payload.passage_count,
             session_id=payload.session_id or None,
         )
-        return StreamingResponse(
-            self._iterate_answer_frames(request),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+        job = self._answer_jobs.start(self._engine.stream_answer(request))
+        return self._build_stream_response(
+            self._frame_streamer.iterate_frames(job, announce=True)
         )
 
-    def _iterate_answer_frames(self, request: QuestionRequest) -> Iterator[str]:
-        """Convert engine events into SSE frames.
+    async def get_answer_events(
+        self, answer_id: str, request: Request, after: int = 0
+    ) -> StreamingResponse:
+        """Resume an answer's stream after event number ``after``.
 
-        This is a synchronous generator on purpose: Starlette runs it in a
-        worker thread, which keeps the blocking model call off the event loop
-        without the engine needing to be async throughout.
+        The standard ``Last-Event-ID`` header is honoured too, so a native
+        ``EventSource`` reconnecting on its own resumes correctly as well.
         """
-        for event in self._engine.stream_answer(request):
-            yield self._event_encoder.encode(event)
+        job = self._answer_jobs.find(answer_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404, detail="Jawaban tidak ditemukan atau sudah kedaluwarsa."
+            )
+        after_event_number = max(after, self._read_last_event_number(request))
+        return self._build_stream_response(
+            self._frame_streamer.iterate_frames(job, after_event_number=after_event_number)
+        )
+
+    async def post_answer_cancel(self, answer_id: str) -> JSONResponse:
+        """Stop generating an answer, which no longer ends when its reader leaves."""
+        job = self._answer_jobs.find(answer_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404, detail="Jawaban tidak ditemukan atau sudah kedaluwarsa."
+            )
+        job.request_cancel()
+        return JSONResponse({"cancel_requested": True, "answer_id": answer_id})
+
+    def _read_last_event_number(self, request: Request) -> int:
+        """The event number in a ``Last-Event-ID`` header, or 0 when absent or invalid."""
+        header_value = request.headers.get("last-event-id", "").strip()
+        return int(header_value) if header_value.isdigit() else 0
+
+    def _build_stream_response(self, frames: Iterator[str]) -> StreamingResponse:
+        """Wrap SSE frames in a response that nothing along the way will buffer."""
+        return StreamingResponse(
+            frames, media_type="text/event-stream", headers=self.STREAM_HEADERS
+        )
 
     async def post_search(self, payload: SearchPayload) -> JSONResponse:
         """Return retrieved passages without generating an answer."""

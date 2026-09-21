@@ -161,11 +161,18 @@ HOST=0.0.0.0
 | Tab | Fungsi |
 |---|---|
 | **Tanya Jawab** | Pertanyaan dan jawaban mengalir, dengan sitasi yang dapat diklik |
-| **Telusuri Potongan** | Melihat potongan yang ditemukan tanpa membuat jawaban — berguna untuk memeriksa mutu pencarian |
-| **Daftar Dokumen** | Seluruh dokumen terindeks beserta statusnya |
+| **Telusuri Potongan** | Melihat potongan yang ditemukan tanpa membuat jawaban — berguna untuk memeriksa mutu pencarian (admin saja) |
+| **Daftar Dokumen** | Seluruh dokumen terindeks beserta statusnya (admin saja) |
 
 Panel samping memuat status indeks, tombol indexing, pemilih backend, penyaring
-folder, dan pengatur jumlah sumber.
+folder, dan pengatur jumlah sumber. Panel **Perangkat** hanya tampil untuk
+admin. Tombol **☰** di kiri baris tab menyembunyikan panel samping agar
+percakapan memakai seluruh lebar layar; di ponsel panel itu menjadi laci yang
+tertutup secara bawaan.
+
+Bila koneksi terputus saat jawaban sedang dibuat, antarmuka menyambung kembali
+dan melanjutkan jawaban dari bagian terakhir yang diterima. Lihat
+[arsitektur.md](arsitektur.md#mengapa-jawaban-tidak-dibuat-di-dalam-respons-http).
 
 Pada setiap kartu sumber tersedia **Tampilkan di folder**, **Buka dokumen**, dan
 **Salin lokasi**. "Tampilkan di folder" adalah tindakan bawaan karena tidak
