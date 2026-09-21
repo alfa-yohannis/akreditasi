@@ -415,6 +415,42 @@ p { margin: 0; }
 }
 .role-hint .role-pill { margin-left: 0; justify-self: start; vertical-align: 0; }
 
+/* ===== DEMO PAMERAN — HAPUS SELURUH BLOK INI SETELAH PAMERAN =====
+   Pasangannya: blok bertanda sama di landing.html dan landing.js. */
+.demo-credentials {
+  margin: 18px 0 2px;
+  padding: 16px 18px;
+  background: var(--orange-wash);
+  border: 1px solid #f4d7c0;
+  border-radius: var(--radius-md);
+}
+.demo-credentials-title {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--orange-text);
+}
+.demo-credentials-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.demo-credentials-list dd { margin: 0; }
+.demo-credentials-list code {
+  display: inline-block;
+  padding: 3px 9px;
+  font: 600 13.5px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+}
+/* ===== AKHIR DEMO PAMERAN ===== */
+
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
 

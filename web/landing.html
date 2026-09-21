@@ -102,6 +102,22 @@
               <h2 class="auth-title">Masuk ke Akreditasi RAG</h2>
               <p class="auth-subtitle">Gunakan akun Admin atau Guest Anda.</p>
 
+              <!-- ===== DEMO PAMERAN — HAPUS SELURUH BLOK INI SETELAH PAMERAN =====
+                   Menampilkan kredensial tamu agar pengunjung dapat mencoba
+                   tanpa bertanya. Pasangannya: blok bertanda sama di
+                   landing.css dan landing.js. -->
+              <div class="demo-credentials">
+                <p class="demo-credentials-title">Coba dulu sebagai tamu</p>
+                <dl class="demo-credentials-list">
+                  <dt>Nama pengguna</dt><dd><code>guest</code></dd>
+                  <dt>Kata sandi</dt><dd><code>i am guest</code></dd>
+                </dl>
+                <button class="btn btn-ghost btn-block" type="button" id="button-fill-guest">
+                  Isikan otomatis
+                </button>
+              </div>
+              <!-- ===== AKHIR DEMO PAMERAN ===== -->
+
               <form class="auth-panel" id="sign-in-form" novalidate>
                 <label class="field">
                   <span class="field-label">Nama pengguna</span>

@@ -327,6 +327,18 @@ document.addEventListener('DOMContentLoaded', async function startLandingPage() 
   const signInCard = new SignInCard();
   new OverviewStats().load();
 
+  /* ===== DEMO PAMERAN — HAPUS SELURUH BLOK INI SETELAH PAMERAN =====
+     Pasangannya: blok bertanda sama di landing.html dan landing.css. */
+  const fillGuestButton = document.getElementById('button-fill-guest');
+  if (fillGuestButton) {
+    fillGuestButton.addEventListener('click', function fillGuestCredentials() {
+      document.getElementById('input-username').value = 'guest';
+      document.getElementById('input-password').value = 'i am guest';
+      document.getElementById('button-sign-in').focus();
+    });
+  }
+  /* ===== AKHIR DEMO PAMERAN ===== */
+
   const session = new SessionState();
   const user = await session.load();
   session.applyToPage(user);
