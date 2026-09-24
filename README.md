@@ -110,6 +110,12 @@ sedangkan intinya — mengelola dokumen lokal dan merangkumnya dengan AI — mud
 dipahami. Nama *Akreditasi RAG* tetap dipakai di kode, skrip, dan dokumentasi
 teknis ini.
 
+Untuk pameran pula, landing page dibuka dengan ajakan *"Butuh AI lokal yang
+disesuaikan untuk organisasi Anda? Coba demo ini"* di atas judul utama, dan
+bagian penutupnya menawarkan sistem serupa untuk organisasi pengunjung. Kedua
+tautan **Coba demo ini** menuju formulir masuk, yang selama pameran menampilkan
+akun tamu.
+
 Tiga tab: **Tanya Jawab**, **Telusuri Potongan** (melihat hasil pencarian tanpa
 membuat jawaban — berguna memeriksa mutu retrieval), dan **Daftar Dokumen**.
 Dua tab terakhir hanya tampil untuk admin.
