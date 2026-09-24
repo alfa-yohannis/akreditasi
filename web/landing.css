@@ -328,7 +328,11 @@ p { margin: 0; }
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  padding-bottom: 0.08em;
+  /* The letters are painted by the box's own background, so anything below the
+     box is cut off — and the tight line-height ends it above the tails of g and
+     y. The padding reaches below them; the negative margin keeps the spacing. */
+  padding-bottom: 0.2em;
+  margin-bottom: -0.12em;
 }
 
 .hero-lede {
