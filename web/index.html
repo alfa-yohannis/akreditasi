@@ -6,7 +6,10 @@
        on-screen keyboard opens, so the question box stays above it. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>Custom-Local AI: Akreditasi Universitas — MTI 2026</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <!-- ?v= is the file's content hash. Cloudflare tells browsers to keep static
+       files for 4 hours, so a changed file needs a new address to reach them:
+       update the value (here and on app.js) whenever the file changes. -->
+  <link rel="stylesheet" href="/static/styles.css?v=bfe6fd29">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
 </head>
 <body>
@@ -204,6 +207,6 @@
        a CDN so the interface keeps working without internet access. -->
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=9cbeeb0a"></script>
 </body>
 </html>

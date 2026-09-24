@@ -174,6 +174,24 @@ Memang demikian. Codex melaporkan jawabannya dalam satu peristiwa
 Berkas statis tidak termuat. Pastikan direktori `web\` berisi `index.html`,
 `app.js`, dan `styles.css`, lalu muat ulang dengan `Ctrl+F5`.
 
+### Lewat alamat publik, perubahan gaya tidak muncul
+
+Alamat publik (`https://akreditasi.ayolearn.stream`) melewati Cloudflare, yang
+mengganti `Cache-Control: no-cache` dari server dengan `max-age=14400` untuk
+berkas statis. Peramban lalu memakai `landing.css`, `styles.css`, dan berkas
+`.js` simpanannya hingga 4 jam tanpa memeriksa ulang, padahal HTML-nya selalu
+baru — halaman tampil dengan susunan baru tetapi gaya lama. Periksa dengan:
+
+```powershell
+curl.exe -sI https://akreditasi.ayolearn.stream/static/landing.css
+```
+
+Karena itu `landing.html` dan `index.html` memanggil berkas tersebut dengan
+`?v=` berisi hash isinya, misalnya `/static/landing.css?v=fafebf62`. Setiap kali
+berkas itu diubah, ganti juga nilai `?v=`-nya; nilai baru apa pun berfungsi.
+Penyelesaian permanennya ada di dasbor Cloudflare: **Caching → Configuration →
+Browser Cache TTL → Respect Existing Headers**.
+
 ### Di ponsel, sumber muncul lalu jawaban gagal dengan "network error"
 
 Gejala versi lama: koneksi putus di tengah jeda sebelum jawaban mengalir,

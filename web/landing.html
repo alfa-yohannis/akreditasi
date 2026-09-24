@@ -6,7 +6,10 @@
   <title>Custom-Local AI: Akreditasi Universitas — Magister Teknik Informatika Pradita</title>
   <meta name="description" content="Tanya jawab atas seluruh dokumen akreditasi MTI 2026, dengan sitasi ke dokumen sumber di setiap jawaban.">
   <meta name="theme-color" content="#f26e21">
-  <link rel="stylesheet" href="/static/landing.css">
+  <!-- ?v= is the file's content hash. Cloudflare tells browsers to keep static
+       files for 4 hours, so a changed file needs a new address to reach them:
+       update the value (here and on landing.js) whenever the file changes. -->
+  <link rel="stylesheet" href="/static/landing.css?v=fafebf62">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
 </head>
 <body>
@@ -51,11 +54,8 @@
             Magister Teknik Informatika &middot; LAM INFOKOM 2026
           </p>
           <a class="promo reveal" href="#masuk">
-            <span class="promo-icon" aria-hidden="true">✦</span>
-            <span>
-              Butuh AI lokal yang disesuaikan untuk organisasi Anda?
-              <span class="promo-cta">Coba demo ini …</span>
-            </span>
+            Butuh AI lokal yang disesuaikan untuk organisasi Anda?
+            <span class="promo-cta">Coba demo ini …</span>
           </a>
           <h1 class="hero-title reveal">
             Setiap jawaban akreditasi,
@@ -415,6 +415,6 @@
     </div>
   </footer>
 
-  <script src="/static/landing.js"></script>
+  <script src="/static/landing.js?v=3bdeb1c4"></script>
 </body>
 </html>
