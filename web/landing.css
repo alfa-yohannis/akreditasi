@@ -313,14 +313,14 @@ p { margin: 0; }
 }
 @keyframes pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--orange) 0%, transparent); } }
 
-/* The exhibition pitch, above the eyebrow: the first thing a visitor reads. */
+/* The exhibition pitch, directly above the headline. */
 .promo {
   display: flex;
   align-items: center;
   gap: 12px;
   width: fit-content;
   max-width: 100%;
-  margin-bottom: 16px;
+  margin-top: 18px;
   padding: 11px 16px 11px 12px;
   font-size: 15px;
   line-height: 1.45;
