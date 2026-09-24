@@ -114,8 +114,9 @@ Untuk pameran pula, landing page dibuka dengan ajakan *"Butuh AI lokal yang
 disesuaikan untuk organisasi Anda? Coba demo ini"* tepat di atas judul utama,
 dan bagian tepat sebelum **Fitur** menawarkan sistem serupa untuk organisasi
 pengunjung. Kedua
-tautan **Coba demo ini** menuju formulir masuk, yang selama pameran menampilkan
-akun tamu.
+tautan **Coba demo ini** menuju formulir masuk. Kotak akun tamu di sana sedang
+disembunyikan (kelas `hidden` pada blok *DEMO PAMERAN*), jadi pengunjung memakai
+akun tamu yang tertera di poster.
 
 Tiga tab: **Tanya Jawab**, **Telusuri Potongan** (melihat hasil pencarian tanpa
 membuat jawaban — berguna memeriksa mutu retrieval), dan **Daftar Dokumen**.
