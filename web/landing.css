@@ -949,6 +949,9 @@ p { margin: 0; }
 /* CTA */
 
 .cta { text-align: center; }
+/* Between the hero and Fitur: the next section's own top padding already
+   separates them, so the band needs none below it. */
+.section.cta { padding: 40px 0 0; }
 .cta-inner {
   position: relative;
   padding: 72px 24px;

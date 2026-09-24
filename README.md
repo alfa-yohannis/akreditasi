@@ -111,8 +111,9 @@ dipahami. Nama *Akreditasi RAG* tetap dipakai di kode, skrip, dan dokumentasi
 teknis ini.
 
 Untuk pameran pula, landing page dibuka dengan ajakan *"Butuh AI lokal yang
-disesuaikan untuk organisasi Anda? Coba demo ini"* di atas judul utama, dan
-bagian penutupnya menawarkan sistem serupa untuk organisasi pengunjung. Kedua
+disesuaikan untuk organisasi Anda? Coba demo ini"* tepat di atas judul utama,
+dan bagian tepat sebelum **Fitur** menawarkan sistem serupa untuk organisasi
+pengunjung. Kedua
 tautan **Coba demo ini** menuju formulir masuk, yang selama pameran menampilkan
 akun tamu.
 
