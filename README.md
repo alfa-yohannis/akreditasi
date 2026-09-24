@@ -103,6 +103,13 @@ disembunyikan dari guest. Penyembunyian ini hanya pada tampilan: endpoint
 
 ## Antarmuka
 
+Di web, sistem tampil dengan nama **Custom-Local AI: Akreditasi Universitas** —
+pada landing page, panel samping, judul tab peramban, dan footer. Nama ini
+disiapkan untuk pameran umum: istilah *RAG* terlalu teknis bagi pengunjung,
+sedangkan intinya — mengelola dokumen lokal dan merangkumnya dengan AI — mudah
+dipahami. Nama *Akreditasi RAG* tetap dipakai di kode, skrip, dan dokumentasi
+teknis ini.
+
 Tiga tab: **Tanya Jawab**, **Telusuri Potongan** (melihat hasil pencarian tanpa
 membuat jawaban — berguna memeriksa mutu retrieval), dan **Daftar Dokumen**.
 Dua tab terakhir hanya tampil untuk admin.

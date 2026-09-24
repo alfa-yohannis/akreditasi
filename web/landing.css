@@ -106,6 +106,9 @@ p { margin: 0; }
 
 .hidden { display: none !important; }
 
+/* Holds a multi-word name on one line: a heading may wrap before it, never inside it. */
+.keep-together { white-space: nowrap; }
+
 :where(a, button, input):focus-visible {
   outline: 2px solid var(--orange);
   outline-offset: 3px;
@@ -213,13 +216,18 @@ p { margin: 0; }
 
 .brand { display: inline-flex; align-items: center; gap: 10px; }
 .brand-mark { color: var(--orange); }
+/* Name over descriptor, stacked so the lockup stays narrow enough for a phone. */
 .brand-text {
+  display: flex;
+  flex-direction: column;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 18px;
+  line-height: 1.1;
   letter-spacing: -0.03em;
+  white-space: nowrap;
 }
-.brand-accent { color: var(--orange-text); margin-left: 3px; }
+.brand-accent { margin-top: 2px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--orange-text); }
 
 .nav-links { display: flex; gap: 28px; margin-left: auto; }
 .nav-links a {
@@ -573,10 +581,14 @@ p { margin: 0; }
 .demo-chrome > span { width: 11px; height: 11px; border-radius: 50%; background: var(--line-strong); }
 .demo-chrome > span:first-child { background: #f26e21; opacity: 0.8; }
 .demo-url {
+  min-width: 0;
   margin: 0 auto;
   padding: 3px 14px;
+  overflow: hidden;
   font-size: 12.5px;
   color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 999px;

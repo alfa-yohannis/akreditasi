@@ -287,6 +287,16 @@ html, body {
   line-height: 1.2;
 }
 
+/* The descriptor under the product name, as in the landing page's lockup. */
+.title-descriptor {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--accent-text);
+}
+
 .subtitle {
   margin: 4px 0 0;
   font-size: 11.5px;
