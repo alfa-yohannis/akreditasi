@@ -1,0 +1,59 @@
+---
+# Fig. 4 — resumable answer stream. Rendered by render_diagrams.py.
+# Same pastel palette as architecture.dot. Sized for one IEEE column.
+# "#35;" below is Mermaid's escape for "#", which otherwise starts an entity code.
+# Every message ends with its step number, (1) to (11).
+config:
+  theme: base
+  fontFamily: Arial
+  # Top-level fontSize overrides the sequence font sizes below, so set it too.
+  fontSize: 10.5
+  themeVariables:
+    fontFamily: Arial
+    fontSize: 10.5px
+    actorBkg: "#DDEBF9"
+    actorBorder: "#000000"
+    actorTextColor: "#1F2933"
+    actorLineColor: "#AEBBC8"
+    signalColor: "#5B6773"
+    signalTextColor: "#1F2933"
+    noteBkgColor: "#FFF4CC"
+    noteBorderColor: "#000000"
+    noteTextColor: "#1F2933"
+  sequence:
+    mirrorActors: false
+    width: 60
+    height: 22
+    actorMargin: 12
+    messageMargin: 14
+    boxMargin: 8
+    diagramMarginX: 2
+    diagramMarginY: 6
+    actorFontFamily: Arial
+    actorFontSize: 10
+    actorFontWeight: bold
+    messageFontFamily: Arial
+    messageFontSize: 10
+    noteFontFamily: Arial
+    noteFontSize: 10
+---
+sequenceDiagram
+  participant B as Browser
+  participant S as Server
+  participant J as Answer job
+  participant M as Model
+  B->>S: POST /api/ask (1)
+  S->>J: start (2)
+  S-->>B: answer id (3)
+  J-->>B: #35;1 sources (4)
+  J->>M: prompt (5)
+  M-->>J: text (6)
+  J-->>B: #35;2 … #35;k text (7)
+  rect rgb(250, 222, 230)
+    Note over B,S: connection lost
+    M-->>J: text (8)
+    Note over J: logs #35;k+1 … #35;n
+  end
+  B->>S: GET ?after=k (9)
+  S-->>B: #35;k+1 … #35;n, live (10)
+  J-->>B: done, saved (11)

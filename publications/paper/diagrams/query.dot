@@ -1,0 +1,51 @@
+// Fig. 3 — question-answering pipeline. Rendered by render_diagrams.py.
+// Same pastel palette as architecture.dot. Sized for one IEEE column (252 pt).
+digraph query {
+  graph [rankdir=TB, newrank=true, fontname="Helvetica", nodesep=0.12, ranksep=0.15,
+         pad="0.02,0.04", splines=line, bgcolor="white"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=7.5,
+         fontcolor="#1F2933", penwidth=0.8, margin="0.09,0.05", height=0.24];
+  edge  [color="#5B6773", penwidth=0.7, arrowsize=0.5, fontname="Helvetica",
+         fontsize=6.5, fontcolor="#44515E"];
+
+  question [fillcolor="#D9F2EF", color="black",
+            label=<<B>Question</B>  <FONT POINT-SIZE="6.5">in everyday Indonesian</FONT>>];
+  expand   [fillcolor="#DDEBF9", color="black",
+            label=<<B>Follow-up check</B><BR/><FONT POINT-SIZE="6.5">under 6 words? prefix the previous question</FONT>>];
+
+  meaning  [fillcolor="#DDEBF9", color="black",
+            label=<<B>By meaning</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 vector, exact<BR/>cosine over all passages</FONT>>];
+  wording  [fillcolor="#DDEBF9", color="black",
+            label=<<B>By wording</B><BR/><FONT POINT-SIZE="6.5">keywords, stop-words<BR/>dropped; FTS5 BM25</FONT>>];
+
+  fuse     [fillcolor="#DDEBF9", color="black",
+            label=<<B>Reciprocal rank fusion</B><BR/><FONT POINT-SIZE="6.5">score(p) = Σ 1 / (60 + rank of p)</FONT>>];
+  rerank   [fillcolor="#FFE4D4", color="black",
+            label=<<B>Cross-encoder rerank</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3 on the CPU</FONT>>];
+
+  cards    [fillcolor="#D9F2EF", color="black",
+            label=<<B>Evidence cards</B><BR/><FONT POINT-SIZE="6.5">sent first: file,<BR/>place, passage</FONT>>];
+  prompt   [fillcolor="#DDEBF9", color="black",
+            label=<<B>Prompt</B><BR/><FONT POINT-SIZE="6.5">8 grounding rules<BR/>+ history (not evidence)<BR/>+ passages [1]–[6], ≤ 14k chars</FONT>>];
+
+  model    [fillcolor="#FFE4D4", color="black",
+            label=<<B>Answering model</B><BR/><FONT POINT-SIZE="6.5">Qwen3 8B, local (default) — or a cloud model</FONT>>];
+  answer   [fillcolor="#D9F2EF", color="black",
+            label=<<B>Answer streamed</B><BR/><FONT POINT-SIZE="6.5">each claim tagged [n]; saved with its sources</FONT>>];
+
+  { rank=same; meaning; wording; }
+  { rank=same; cards; prompt; }
+
+  // Every edge says what it does or what flows along it, ending with its step.
+  question -> expand [label=< question <B>(1)</B>>];
+  expand -> meaning [class="mid left", label=<query <B>(2)</B>>];
+  expand -> wording [class="mid right", label=<query <B>(2)</B>>];
+  meaning -> fuse [label=< top 40 <B>(3)</B>>];
+  wording -> fuse [label=< top 40 <B>(3)</B>>];
+  fuse -> rerank [label=< best 24 <B>(4)</B>>];
+  rerank -> cards [label=<best 6 <B>(5)</B> >];
+  rerank -> prompt [label=< best 6 <B>(6)</B>>];
+  prompt -> model [label=< instructions + context <B>(7)</B>>];
+  model -> answer [label=< stream text <B>(8)</B>>];
+  cards -> prompt [style=invis];
+}

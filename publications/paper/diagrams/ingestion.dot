@@ -1,0 +1,62 @@
+// Fig. 2 — indexing pipeline. Rendered by render_diagrams.py.
+// Same pastel palette as architecture.dot. Sized for one IEEE column (252 pt).
+digraph ingestion {
+  graph [rankdir=TB, newrank=true, fontname="Helvetica", nodesep=0.12, ranksep=0.15,
+         pad="0.02,0.09", splines=line, bgcolor="white"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=7.5,
+         fontcolor="#1F2933", penwidth=0.8, margin="0.09,0.05", height=0.24];
+  edge  [color="#5B6773", penwidth=0.7, arrowsize=0.5, fontname="Helvetica",
+         fontsize=6.5, fontcolor="#44515E"];
+
+  drive    [fillcolor="#FFF4CC", color="black",
+            label=<<B>Shared drive</B><BR/><FONT POINT-SIZE="6.5">evidence archive</FONT>>];
+  localdir [fillcolor="#FFF4CC", color="black",
+            label=<<B>Local folder</B><BR/><FONT POINT-SIZE="6.5">exports · snapshots</FONT>>];
+  websites [fillcolor="#F1F3F5", color="black",
+            label=<<B>Websites</B><BR/><FONT POINT-SIZE="6.5">SINTA · PDDikti …</FONT>>];
+
+  scan     [fillcolor="#DDF3E4", color="black",
+            label=<<B>Scan</B>  <FONT POINT-SIZE="6.5">skip media, archives, shortcuts</FONT>>];
+
+  changed  [shape=diamond, style="filled", fillcolor="#FFFFFF", color="black",
+            margin="0.01,0.005", height=0.34, width=0.95,
+            label=<<FONT POINT-SIZE="6.5">changed since<BR/>last run?</FONT>>];
+  skip     [fillcolor="#F1F3F5", color="black",
+            label=<<B>Skip</B><BR/><FONT POINT-SIZE="6.5">keep its passages</FONT>>];
+
+  extract  [fillcolor="#DDF3E4", color="black",
+            label=<<B>Extract text + location</B><BR/><FONT POINT-SIZE="6.5">PDF page · Excel sheet · slide;<BR/>Word, web page, text: whole file</FONT>>];
+  ocr      [fillcolor="#DDF3E4", color="black", style="rounded,filled,dashed",
+            label=<<B>OCR</B><BR/><FONT POINT-SIZE="6.5">RapidOCR</FONT>>];
+
+  split    [fillcolor="#DDF3E4", color="black",
+            label=<<B>Split into passages</B><BR/><FONT POINT-SIZE="6.5">≤ 450 tokens, 80 overlapping; cut at<BR/>paragraph, else sentence, else word</FONT>>];
+  embed    [fillcolor="#FFE4D4", color="black",
+            label=<<B>Embed</B>  <FONT POINT-SIZE="6.5">BGE-M3, GPU → 1,024 numbers</FONT>>];
+
+  // two separate stores, joined only by the passage id
+  catalogue [shape=cylinder, style="filled", fillcolor="#ECE6F8", color="black", margin="0.06,0.05",
+             label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite: text, location,<BR/>FTS5 keyword index</FONT>>];
+  vectors   [shape=note, style="filled", fillcolor="#ECE6F8", color="black", margin="0.08,0.05",
+             label=<<B>Vector index</B><BR/><FONT POINT-SIZE="6.5">NumPy file: one row<BR/>per passage</FONT>>];
+  { rank=same; catalogue; vectors; }
+
+  { rank=same; drive; localdir; websites; }
+  { rank=same; changed; skip; }
+  { rank=same; extract; ocr; }
+
+  // Every edge says what it does or what flows along it, ending with its step.
+  drive -> localdir [style=invis];
+  websites -> localdir [style=dashed, label=<save dated<BR/>copy <B>(1)</B>>];
+  drive -> scan [color="#D07D96", fontcolor="#B4566F", label=<read only <B>(2)</B> >];
+  localdir -> scan [color="#D07D96", fontcolor="#B4566F", label=< read only <B>(2)</B>>];
+  scan -> changed [label=< 1,497 files <B>(3)</B>>];
+  changed -> skip [label=<no <B>(4)</B>>];
+  changed -> extract [label=< yes <B>(4)</B>>];
+  extract -> ocr [style=dashed, label=<scanned<BR/>page <B>(5)</B>>];
+  ocr -> split [style=dashed, class="mid east", label=<text <B>(6)</B>>];
+  extract -> split [label=<sections <B>(6)</B> >];
+  split -> embed [label=< 22,944 passages <B>(7)</B>>];
+  embed -> catalogue [class="mid left", label=<store text <B>(8)</B>>];
+  embed -> vectors [class="mid right", label=<store vectors <B>(8)</B>>];
+}

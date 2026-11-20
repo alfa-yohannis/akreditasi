@@ -1,0 +1,132 @@
+// Fig. 1 — system architecture. Rendered by render_diagrams.py.
+//
+// Pastel palette, one hue per role (fill / outline):
+//   clients     mint      #D9F2EF / #5AAFA6
+//   serving     blue      #DDEBF9 / #6A98CC
+//   models      peach     #FFE4D4 / #DE9670
+//   stores      lavender  #ECE6F8 / #9580C8
+//   indexing    green     #DDF3E4 / #6BAF84
+//   safety      rose      #FADCE4 / #D07D96
+//   sources     yellow    #FFF4CC / #D4B24C
+//   external    grey      #F1F3F5 / #9AA5B1
+digraph architecture {
+  graph [rankdir=TB, newrank=true, fontname="Helvetica", fontsize=8, fontcolor="#1F2933",
+         nodesep=0.30, ranksep=0.14, forcelabels=true, pad="0.06,0.03", splines=line, bgcolor="white"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=7.5,
+         fontcolor="#1F2933", penwidth=0.8, margin="0.10,0.055", height=0.26];
+  edge  [color="#5B6773", penwidth=0.7, arrowsize=0.5, fontname="Helvetica",
+         fontsize=6.5, fontcolor="#44515E"];
+
+  // ---- outside the workstation ------------------------------------------
+  browser [fillcolor="#D9F2EF", color="black",
+           label=<<B>Browser</B><BR/><FONT POINT-SIZE="6.5">PC or phone on the office network</FONT>>];
+  cloud   [fillcolor="#FFF6F0", color="black", style="rounded,filled,dashed",
+           label=<<B>Answering model, cloud</B> <FONT POINT-SIZE="6.5">(optional)</FONT><BR/><FONT POINT-SIZE="6.5">Claude · GPT · Gemini via their CLIs</FONT>>];
+  websites [fillcolor="#F1F3F5", color="black",
+           label=<<B>Public websites</B><BR/><FONT POINT-SIZE="6.5">SINTA · Google Scholar · PDDikti</FONT>>];
+
+  subgraph cluster_workstation {
+    label=<<B>Office workstation</B>  ·  Core i7-14700F, 32 GB RAM, RTX 4060 (8 GB)>;
+    labeljust=r; labelloc=b; style="rounded,dashed"; color="black"; penwidth=0.6; bgcolor="#FBFCFD"; margin=6;
+
+    subgraph cluster_answer {
+      label=<<B>Answering</B>>; labeljust=l; labelloc=t;
+      style="rounded"; color="black"; penwidth=0.6; bgcolor="#F4F8FD"; margin=5;
+      server    [fillcolor="#DDEBF9", color="black",
+                 label=<<B>Web server</B><BR/><FONT POINT-SIZE="6.5">FastAPI · sign-in<BR/>answer jobs · SSE</FONT>>];
+      rag       [fillcolor="#DDEBF9", color="black",
+                 label=<<B>RAG engine</B><BR/><FONT POINT-SIZE="6.5">follow-ups · prompt · citations</FONT>>];
+      retriever [fillcolor="#DDEBF9", color="black",
+                 label=<<B>Hybrid retriever</B><BR/><FONT POINT-SIZE="6.5">meaning + wording<BR/>→ fusion → rerank</FONT>>];
+    }
+
+    subgraph cluster_models {
+      label=<<B>Models</B>>; labeljust=c; labelloc=t;
+      // no frame: edge labels cross into this column, and the peach fills
+      // already group the models
+      peripheries=0; margin=5;
+      llm      [fillcolor="#FFE4D4", color="black",
+                label=<<B>Answering model</B><BR/><FONT POINT-SIZE="6.5">Qwen3 8B via Ollama · GPU · 5.0 GB</FONT>>];
+      embedder [fillcolor="#FFE4D4", color="black",
+                label=<<B>Embedding model</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 · GPU · 1.2 GB</FONT>>];
+      reranker [fillcolor="#FFE4D4", color="black",
+                label=<<B>Reranking model</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3<BR/>CPU · 1.1 GB</FONT>>];
+    }
+
+    subgraph cluster_index {
+      label=<<B>Indexing</B>>; labeljust=l; labelloc=t;
+      style="rounded"; color="black"; penwidth=0.6; bgcolor="#F5FBF7"; margin=5;
+      snapshot [fillcolor="#DDF3E4", color="black",
+                label=<<B>Snapshot fetcher</B><BR/><FONT POINT-SIZE="6.5">dated copies of web pages</FONT>>];
+      localdir [fillcolor="#FFF4CC", color="black",
+                label=<<B>Local folder</B><BR/><FONT POINT-SIZE="6.5">exports · snapshots</FONT>>];
+      drive    [fillcolor="#FFF4CC", color="black",
+                label=<<B>Shared drive</B><BR/><FONT POINT-SIZE="6.5">evidence archive</FONT>>];
+      guard    [fillcolor="#FADCE4", color="black",
+                label=<<B>Read-only guard</B><BR/><FONT POINT-SIZE="6.5">refuses any write to a source</FONT>>];
+      ingest   [fillcolor="#DDF3E4", color="black",
+                label=<<B>Ingestion pipeline</B><BR/><FONT POINT-SIZE="6.5">scan · extract · OCR · split · embed</FONT>>];
+    }
+
+    subgraph cluster_stores {
+      label=<<B>Stored on disk</B>  ·  183 MB index>; labeljust=c; labelloc=b;
+      style="rounded"; color="black"; penwidth=0.6; bgcolor="#F8F6FD"; margin=5;
+      conversations [shape=cylinder, style="filled", fillcolor="#ECE6F8", color="black", margin="0.06,0.05",
+                     label=<<B>Conversations</B><BR/><FONT POINT-SIZE="6.5">SQLite · questions,<BR/>answers, sources</FONT>>];
+      // two separate stores, joined only by the passage id
+      catalogue [shape=cylinder, style="filled", fillcolor="#ECE6F8", color="black", margin="0.06,0.05",
+                 label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite · text, location,<BR/>FTS5 keyword index</FONT>>];
+      // a plain array file, not a database: drawn as a file, not a cylinder
+      vectors   [shape=note, style="filled", fillcolor="#ECE6F8", color="black", margin="0.08,0.05",
+                 label=<<B>Vector index</B><BR/><FONT POINT-SIZE="6.5">NumPy file · 22,944 × 1,024<BR/>float32, normalised</FONT>>];
+    }
+  }
+
+  // ---- rows ---------------------------------------------------------------
+  { rank=same; browser; cloud; websites; }
+  { rank=same; server; snapshot; }
+  { rank=same; rag; llm; localdir; drive; }
+  { rank=same; retriever; embedder; guard; }
+  { rank=same; reranker; ingest; }
+  { rank=same; conversations; catalogue; vectors; }
+
+  // Every edge says what it does or what flows along it, and ends with its
+  // step number: (1)-(6) build the index in advance, (7)-(15) answer a question.
+  // Two-headed edges are calls that return a result, labelled input → output.
+
+  // ---- answering path -----------------------------------------------------
+  browser:s -> server:ne [label=< question <B>(7)</B>>];
+  server -> browser:sw [constraint=false, class="mid left at78", label=<cards, then answer <B>(14)</B>>];
+  server -> rag [dir=both, label=< question →<BR/> events <B>(8)</B>>];
+  rag -> retriever [dir=both, class="mid west", label=< query →<BR/> 6 passages <B>(9)</B>>];
+  // class "mid": label centred on the line (see render_diagrams.py)
+  rag -> llm [dir=both, class="mid north at57", label=<prompt →<BR/>answer <B>(13)</B>>];
+  cloud:s -> rag:nw [dir=both, style=dashed, color="#DE9670", fontcolor="#B5683F",
+                     class="mid left at10", taillabel=<prompt → answer,<BR/>if chosen <B>(13)</B>>];
+  retriever -> embedder [dir=both, class="mid above at55", label=<convert query to vector <B>(10)</B>>];
+  retriever -> reranker [dir=both, class="mid north at60", label=<rerank 24, keep best 6 <B>(12)</B>>];
+  retriever -> catalogue [dir=both, class="mid left at50", xlabel=<search by<BR/>wording <B>(11)</B>>];
+  retriever -> vectors [dir=both, class="mid right at65", xlabel=<search by meaning <B>(11)</B>>];
+  rag:w -> conversations [class="mid east at58", xlabel=<save<BR/>exchange <B>(15)</B>>];
+
+  // ---- indexing path ------------------------------------------------------
+  websites -> snapshot [label=< fetch pages <B>(1)</B>>];
+  snapshot -> localdir [label=< save dated copy <B>(2)</B>>];
+  drive -> guard [label=< files <B>(3)</B>>];
+  localdir -> guard [label=<files <B>(3)</B> >];
+  guard -> ingest [label=< contents, read only <B>(4)</B>>];
+  embedder:se -> ingest [dir=both, class="mid north at78", label=<convert passages<BR/>to vectors <B>(5)</B>>];
+  ingest -> catalogue [minlen=2, class="mid below at25", xlabel=<store text <B>(6)</B>>];
+  ingest -> vectors [minlen=2, class="mid right at45", xlabel=<store vectors <B>(6)</B>>];
+
+  // keep the three columns in order: answering | models | indexing
+  rag -> llm [style=invis, weight=5];
+  embedder -> guard [style=invis];
+  cloud -> browser [style=invis];
+  browser -> websites [style=invis];
+  // stores left to right: conversations | catalogue | vectors
+  conversations -> catalogue -> vectors [style=invis];
+  // the reranking model sits under the embedding model, clear of the line to the vector file
+  embedder -> reranker [style=invis, weight=10];
+
+}
