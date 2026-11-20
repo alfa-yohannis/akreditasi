@@ -79,3 +79,10 @@ $RECYCLE.BIN/
 *.synctex.gz
 *.fls
 *.fdb_latexmk
+
+# --- Evaluasi: isi internal tetap lokal ----------------------------------------
+# Jawaban model mengutip dokumen akreditasi internal, dan sebagian pertanyaan
+# benchmark menyebut nama staf. Repositori ini publik, jadi keduanya disimpan
+# terpisah. Lihat evaluation/privacy.py.
+evaluation_results/private/
+evaluation/queries.private.json

@@ -1,0 +1,25 @@
+{
+  "description": "Benchmark questions (published copy: personal names are replaced by placeholders; the benchmark uses the git-ignored queries.private.json with the real questions when present). 'logged' questions were asked by real users and are taken from data/conversations.db; 'written' questions cover the accreditation criteria and the system's typical lookups (decree numbers, tables, people, prose).",
+  "queries": [
+    {"id": "q01", "source": "logged",  "kind": "table",       "text": "Berapa rata-rata beban EWMP DTPR pada TS?"},
+    {"id": "q02", "source": "logged",  "kind": "table",       "text": "Berapa jumlah penelitian DTPR"},
+    {"id": "q03", "source": "logged",  "kind": "out-of-scope","text": "jam berapa sekarang?"},
+    {"id": "q04", "source": "logged",  "kind": "person",      "text": "Siapakah Pak [dosen A]?"},
+    {"id": "q05", "source": "logged",  "kind": "fact",        "text": "alamat pradita?"},
+    {"id": "q06", "source": "logged",  "kind": "person",      "text": "ceritakan siapa pak [dosen A]"},
+    {"id": "q07", "source": "logged",  "kind": "person",      "text": "siapakah rektor pradita?"},
+    {"id": "q08", "source": "logged",  "kind": "person",      "text": "Siapakah Ibu [dosen B]?"},
+    {"id": "q09", "source": "logged",  "kind": "prose",       "text": "Apa saja kriteria pada instrumen akreditasi LAM INFOKOM untuk program magister?"},
+    {"id": "q10", "source": "written", "kind": "prose",       "text": "Apa visi dan misi Program Studi Magister Teknik Informatika?"},
+    {"id": "q11", "source": "written", "kind": "table",       "text": "Berapa jumlah mahasiswa baru pada TS-1?"},
+    {"id": "q12", "source": "written", "kind": "curriculum",  "text": "Mata kuliah apa saja yang membahas machine learning?"},
+    {"id": "q13", "source": "written", "kind": "list",        "text": "Sebutkan publikasi dosen di jurnal internasional bereputasi."},
+    {"id": "q14", "source": "written", "kind": "list",        "text": "Apa saja kerja sama program studi dengan industri?"},
+    {"id": "q15", "source": "written", "kind": "table",       "text": "Berapa rasio dosen terhadap mahasiswa?"},
+    {"id": "q16", "source": "written", "kind": "prose",       "text": "Bagaimana sistem penjaminan mutu internal dijalankan?"},
+    {"id": "q17", "source": "written", "kind": "identifier",  "text": "Apa nomor SK pengangkatan ketua program studi?"},
+    {"id": "q18", "source": "written", "kind": "table",       "text": "Berapa rata-rata masa studi lulusan?"},
+    {"id": "q19", "source": "written", "kind": "list",        "text": "Kegiatan pengabdian kepada masyarakat apa yang dilakukan dosen pada tahun 2024?"},
+    {"id": "q20", "source": "written", "kind": "list",        "text": "Siapa saja dosen tetap program studi beserta jabatan akademiknya?"}
+  ]
+}
