@@ -405,8 +405,14 @@ class IngestionPipeline:
         return self.progress.as_dictionary()
 
     def release_embedder(self) -> None:
-        """Unload the embedding model used for indexing, freeing its memory."""
-        self._embedder.unload()
+        """Unload the embedding model used for indexing, freeing its memory.
+
+        An embedder without ``unload`` (a test stand-in, say) holds nothing to
+        free, so it is left alone rather than failing the indexing thread.
+        """
+        unload = getattr(self._embedder, "unload", None)
+        if unload is not None:
+            unload()
 
     def _forget_documents_missing_vectors(self, stored_signatures: dict[str, str]) -> None:
         """Drop the stored signature of any document whose vectors were lost.
