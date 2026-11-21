@@ -21,7 +21,7 @@ digraph query {
   fuse     [fillcolor="#DDEBF9", color="black",
             label=<<B>Reciprocal rank fusion</B><BR/><FONT POINT-SIZE="6.5">score(p) = Σ 1 / (60 + rank of p)</FONT>>];
   rerank   [fillcolor="#FFE4D4", color="black",
-            label=<<B>Cross-encoder rerank</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3 on the CPU</FONT>>];
+            label=<<B>Cross-encoder rerank</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3, int8 on the CPU</FONT>>];
 
   cards    [fillcolor="#D9F2EF", color="black",
             label=<<B>Evidence cards</B><BR/><FONT POINT-SIZE="6.5">sent first: file,<BR/>place, passage</FONT>>];

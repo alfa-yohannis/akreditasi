@@ -1,6 +1,8 @@
 %% ---------------------------------------------------------------------------
-%% IEEE conference paper (at most six pages) — architecture and operation of
-%% the system. Written in plain language for a non-specialist reader.
+%% IEEE conference paper (at most eight pages) — architecture, operation and
+%% performance evaluation of the system. Written in plain language for a
+%% non-specialist reader. The evaluation's numbers come from the result files
+%% in evaluation_results/ (see evaluation_results/summary.md).
 %% Built with the official IEEEtran class (v1.8b), bundled in this directory.
 %%
 %% The figures are drawn with Graphviz and Mermaid; their sources and the
@@ -19,7 +21,6 @@
 \usepackage{graphicx}
 \usepackage{microtype}
 \usepackage{xcolor}
-
 \definecolor{linkblue}{HTML}{1F4E79}
 
 \usepackage[colorlinks=true,allcolors=linkblue,breaklinks=true]{hyperref}
@@ -54,7 +55,14 @@ checkable and the system dependable: source files are never modified, an index
 of 1{,}497 files rebuilds incrementally while colleagues keep editing the drive,
 answers survive dropped connections, and the whole system runs on one office
 workstation with an 8\,GB graphics card, so confidential material need not
-leave the building.
+leave the building. A stage-by-stage performance evaluation on twenty questions
+found the bottleneck in an unexpected place: a model left on the graphics card
+had pushed it past its memory, and Windows silently lent it system memory,
+making the answering model ten times slower. Moving that model to the
+processor and compiling the re-scoring model to 8-bit integers cut the median
+time to a complete answer from about 45 to about 7 seconds on the same
+hardware, without loss of accuracy in our checks; a smaller answering model,
+though faster to start, misattributed facts.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -94,8 +102,11 @@ new algorithm but a complete, deployed design, and the reasoning behind it:
   by meaning with search by exact wording, because accreditation documents need
   both;
 \item the engineering that makes the system safe to point at a live archive and
-  usable on a phone (Sections~\ref{sec:delivery}--\ref{sec:workstation}), and a
-  frank account of its limits (Section~\ref{sec:limits}).
+  usable on a phone (Sections~\ref{sec:delivery}--\ref{sec:workstation});
+\item a stage-by-stage performance evaluation (Sections~\ref{sec:method}
+  and~\ref{sec:results}) that locates the bottleneck, removes it on the same
+  hardware, and tests a smaller answering model for accuracy as well as speed;
+  and a frank account of the system's limits (Section~\ref{sec:limits}).
 \end{itemize}
 
 %% ===========================================================================
@@ -181,8 +192,10 @@ the step numbers in this section refer to its arrows.
 something searchable. Public web pages are fetched (step~1) and saved as dated
 copies in a local folder (step~2), beside exports copied out of the shared
 drive. Files from both folders reach the ingestion pipeline only through the
-read-only guard (steps 3--4). The pipeline splits every document into passages,
-has the embedding model turn each passage into a vector (step~5), and stores
+read-only guard (steps 3--4). The pipeline splits every document into
+\emph{passages}---overlapping pieces of a few hundred words, the unit that is
+searched, shown on an evidence card and cited---has the embedding model turn
+each passage into a vector (step~5), and stores
 every passage twice (step~6): as text in a SQLite database with a full-text
 keyword index, and as a vector in a NumPy matrix. Section~\ref{sec:indexing}
 follows this path in detail.
@@ -202,10 +215,12 @@ the engine saves the exchange in the conversation store (step~15).
 Section~\ref{sec:answering} follows this path in detail.
 
 The embedding model is BGE-M3~\cite{bge}, a multilingual model that handles
-Indonesian well and produces vectors of 1{,}024 numbers; the reranking model is
-a cross-encoder from the same family; and the answering model is, by default,
-Qwen3 with 8 billion parameters~\cite{qwen}, served on the same machine by
-Ollama (Table~\ref{tab:models}).
+Indonesian well and produces vectors of 1{,}024 numbers; it runs on the graphics
+card to index and on the processor to encode questions
+(Section~\ref{sec:results}). The reranking model is a cross-encoder from the
+same family, run on the processor in 8-bit integers; and the answering model
+is, by default, Qwen3 with 8 billion parameters~\cite{qwen}, served on the same
+machine by Ollama (Table~\ref{tab:models}).
 
 The code is Python, with dependencies running one way: the storage layer knows
 nothing about the web, and the web server never touches the database directly.
@@ -349,7 +364,10 @@ number such as \texttt{SK-045/XYZ/VI/2025} precisely, and is blind to
 paraphrase. Accreditation documents are full of both---narrative argument on one
 page, decree and registration numbers on the next---so dropping either method
 would quietly make a whole class of questions unanswerable. Each search returns
-its 40 best passages (step~3).
+its 40 best passages (step~3). The numbers form a funnel, each stage narrower
+and more careful than the last: both searches are cheap, so they cast a wide
+net; the re-scoring model reads every passage it is given in full, so it gets
+24; and the answering model gets six.
 
 \subsubsection{Fusing the rankings}
 The two candidate lists cannot simply be added, because cosine similarity and
@@ -368,7 +386,10 @@ diagnosing a poor answer.
 \subsubsection{Re-scoring}
 The 24 best fused passages (step~4) are read once more, in full and together
 with the question, by BGE-reranker-v2-m3, a cross-encoder~\cite{nogueira}, and
-the six it scores highest are kept and numbered [1]--[6]. These six go both to
+the six it scores highest are kept and numbered [1]--[6]. It runs on the
+processor, compiled with OpenVINO and quantised to 8-bit integers, which makes
+it three times faster than in PyTorch while keeping 95\,\% of its choices
+(Section~\ref{sec:results}). These six go both to
 the browser, as evidence cards (step~5), and into the prompt (step~6). If the
 reranker is
 unavailable, the fused order is used instead, so the system degrades rather
@@ -416,16 +437,17 @@ model selector, so the choice is made knowingly.
 \toprule
 Role & Model & Runs on & Memory \\
 \midrule
-Embedding  & BGE-M3              & GPU & 1.2\,GB \\
-Re-scoring & BGE-reranker-v2-m3  & CPU & 1.1\,GB \\
-Answering  & Qwen3 8B, 4-bit (default) & GPU & 5.0\,GB \\
+Embedding  & BGE-M3              & GPU$^{a}$ / CPU & 2.3\,GB \\
+Re-scoring & BGE-reranker-v2-m3, 8-bit  & CPU & 0.6\,GB \\
+Answering  & Qwen3 8B, 4-bit (default) & GPU & 5.8\,GB$^{b}$ \\
 Answering  & Claude, GPT or Gemini      & cloud & --- \\
 \bottomrule
 \end{tabular}
 
 \smallskip
-\parbox{\columnwidth}{\scriptsize Only the last row sends text off the
-premises: the question and the six retrieved passages.}
+\parbox{\columnwidth}{\scriptsize $^{a}$GPU while indexing, CPU for questions.
+$^{b}$Including its 8{,}192-token context. Only the last row sends text off
+the premises: the question and the six retrieved passages.}
 \end{table}
 
 %% ===========================================================================
@@ -474,20 +496,23 @@ does.
 The deployment machine is a desktop with a 20-core Core i7-14700F, 32\,GB of
 memory and an RTX~4060 graphics card with 8\,GB of video memory (R4).
 
-\emph{Memory.} Loading all three models onto the graphics card would take about
-7.3\,GB before any working memory for the model's context, risking an
-out-of-memory failure in the middle of an answer, when a user is already
-waiting. The re-scoring model therefore runs on the processor, where scoring two
-dozen passages takes one to two seconds. Qwen3 8B is the largest model that fits
+\emph{Memory.} The answering model needs 5.8\,GB of the card's 8\,GB, including
+working memory for an 8{,}192-token context, and the desktop itself takes
+0.6--1.1\,GB. Nothing else fits beside them, so only the answering model stays
+on the card while the system answers. The re-scoring model runs on the
+processor, and so does the embedding model when it encodes a question; it
+uses the card only while indexing and releases it afterwards. We learnt this
+the hard way: Section~\ref{sec:results} shows what happened when the embedding
+model stayed on the card. Qwen3 8B is the largest model that fits
 \emph{entirely} on the card with room for a long RAG context; a 14-billion
 parameter model at the same precision needs about 9\,GB, spills onto the
 processor, and in our trials answered at roughly a fifth of the speed.
 
 \emph{No vector database.} The index is a SQLite file and a NumPy matrix rather
 than a dedicated vector database. All 22{,}944 vectors occupy 94\,MB of memory,
-and comparing a question against every one of them takes about 8\,ms on this
+and comparing a question against every one of them takes 1.8\,ms on this
 machine---exact, with no recall lost to approximation---while a keyword search
-takes about 4\,ms. An approximate index would add a dependency and lose
+takes about 24\,ms (Section~\ref{sec:results}). An approximate index would add a dependency and lose
 recall to save time no user could notice.
 
 \emph{Source files are never modified} (R2). The rule is enforced in software,
@@ -498,7 +523,7 @@ path inside the archive; Excel files are opened in a read-only streaming mode;
 and the server refuses to start if its own data folder lies inside the archive.
 Sixteen tests cover these guarantees, one of which runs a full indexing pass and
 verifies that every source file is byte-for-byte unchanged. The whole suite of
-481 unit tests runs in about 15 seconds without network access or model
+487 unit tests runs in about 30 seconds without network access or model
 downloads, with the models replaced by stand-ins.
 
 %% ===========================================================================
@@ -510,20 +535,340 @@ of text in 22{,}944 passages averaging 356 tokens---and occupies 183\,MB on
 disk; the downloaded models account for most of the remaining space. During
 extraction 1{,}306 pages were recognised as scans and 305 of them were
 recovered by OCR. One workstation serves the whole team over the office
-network, desktops and phones alike. With the local model an answer takes from a
-few seconds to under a minute, depending mostly on its length; cloud models at
-their highest reasoning setting typically take 30 to 60 seconds.
+network, desktops and phones alike. Before the changes of
+Section~\ref{sec:results}, local answers in the usage log took 24 to 148
+seconds (median 55); the evidence cards now appear in about TODO-CARDS seconds
+and the first words of the answer after about TODO-FIRST. Cloud models at their
+highest reasoning setting typically take 30 to 60 seconds.
+
+%% ===========================================================================
+\section{Evaluation Methodology}
+\label{sec:method}
+
+The system's own log showed that some answers took two minutes, far beyond
+what the hardware should need. We therefore measured it, stage by stage, to
+answer three research questions:
+\begin{itemize}
+\item[RQ1] Where does the time go when the system answers a question?
+\item[RQ2] How much faster can the slowest stages run on the same hardware,
+  without changing what the model reads?
+\item[RQ3] Can a smaller answering model replace the default without losing
+  grounding or accuracy?
+\end{itemize}
+
+\subsubsection{Setup}
+All measurements ran on the deployment workstation
+(Section~\ref{sec:workstation}) under Windows~11, with PyTorch~2.11 (CUDA~12.8),
+sentence-transformers~6.0 and Ollama~0.40.16, against the deployed index of
+22{,}944 passages. The answering models are 4-bit (Q4\_K\_M) builds, run with
+the system's own settings: 8{,}192-token context, temperature~0.2, at most
+1{,}536 output tokens and reasoning mode off.
+
+\subsubsection{Questions}
+Twenty questions in Indonesian: nine taken from the system's usage log and
+eleven written to cover the kinds of question the design targets---values in
+tables, people, lists, narrative, a curriculum query, an identifier, a fact, and
+one question the archive cannot answer. Every retrieval configuration ran all
+twenty. Because a single answering run takes up to 45 minutes, the answering
+model was measured on five of them, chosen to span answers from one sentence
+to long lists.
+
+\subsubsection{Protocol}
+Each configuration ran in its own process, one after another, with nothing
+else running on the machine. It first answered every question three times as
+a warm-up, which was discarded so that loading, compilation and caches would
+not count, and then ten times more, which were timed: 200 timed retrievals or
+50 timed answers per configuration. Every stage was timed separately with a
+monotonic nanosecond clock, using the system's own code. We report medians, and
+95th percentiles where the spread matters. Ollama keeps the work done on a
+prompt and reuses it when the same prompt returns; repeated questions would
+thus be answered unrealistically fast---in our first runs, the first word came
+after 0.5\,s instead of 18\,s. Every request therefore began with a unique
+line, so that each prompt was new, as every real question is. Memory on the
+graphics card was read from Windows' adapter counters, which separate the
+card's own (\emph{dedicated}) memory from system memory lent to it
+(\emph{shared}).
+
+\subsubsection{Measures}
+\emph{Speed}: time per stage; for the answering model, time to the first word,
+time to the complete answer, and how fast it reads the prompt and writes the
+answer, in tokens per second. \emph{Agreement}: overlap@6, the share of the six
+passages handed to the model by the baseline that a faster configuration also
+hands to it, averaged over the twenty questions; a speed-up was accepted only
+at 90\,\% or more. It shows how much a change alters what the model reads,
+not whether retrieval is right. \emph{Grounding}, per answer: whether it cites
+at all, whether it cites a passage that does not exist, and whether it refuses
+(opens with the prescribed ``not found'' sentence). \emph{Accuracy of
+figures}: every number of two or more digits, decimal and letter--digit code
+in an answer---years, counts, percentages, course and decree numbers---must
+appear in the six passages, their locations or the question. A figure found
+in none of them was invented, miscopied or computed, all of which the
+system's rules forbid. This is a floor on errors rather than a measure of
+correctness: it cannot see a correct figure attached to the wrong subject.
+The decision rule was fixed before the runs: a smaller model replaces the
+default only if it is no worse on grounding and figures.
+
+\subsubsection{Candidates}
+Candidates came from a literature review, kept with the results. For
+embedding, no smaller model---including recent ones from Chinese
+labs---matches BGE-M3 on Indonesian retrieval~\cite{bge}, so only where and
+at what precision it runs was varied. For re-scoring, the same model was
+compiled with OpenVINO and quantised to 8-bit integers by post-training
+quantisation~\cite{nncf}, calibrated on 300 question--passage pairs drawn from
+the corpus. For the stores, the candidates were approximate
+FAISS~\cite{faiss} indexes and faster BM25 engines~\cite{bm25s}; whether they
+could matter was judged from the measured search times. For answering, Ollama's 8-bit key--value cache was
+tried (flash attention is already on by default~\cite{ollama}), as was
+Qwen3.5 4B~\cite{qwen35}, which matches Qwen3 8B on the Indonesian SEA-HELM
+benchmark (62.7 against 62.5) and exceeds it on extractive question answering,
+the skill RAG relies on (80.5 against 75.0)~\cite{seahelm}.
+
+%% ===========================================================================
+\section{Evaluation Results}
+\label{sec:results}
+
+\subsection{RQ1: Where does the time go?}
+
+\begin{table}[t]
+\caption{Time per question as deployed, by stage}
+\label{tab:stages}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Stage & Median & 95th pct. \\
+\midrule
+Encode the question (BGE-M3, GPU)        & 174\,ms  & 230\,ms \\
+Search by meaning (exact, 22{,}944)      & 1.8\,ms  & 1.9\,ms \\
+Search by wording (FTS5, BM25)           & 24\,ms   & 39\,ms \\
+Fuse rankings, build prompt              & $<$0.1\,ms & $<$0.1\,ms \\
+Re-score 24 passages (PyTorch, CPU)      & 9.4\,s   & 11.0\,s \\
+Answering model: first word              & 18.5\,s  & 21.1\,s \\
+Answering model: complete answer         & 35.0\,s  & 83.6\,s \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\parbox{\columnwidth}{\scriptsize Retrieval: 20 questions $\times$ 10 timed
+passes; answering: 5 questions $\times$ 10, each prompt new.}
+\end{table}
+
+Table~\ref{tab:stages} answers RQ1. Two stages take 99.5\,\% of the
+44.6\,seconds a question costs: re-scoring, 9.4\,s, and the answering model,
+35.0\,s. Encoding the question, both searches, fusion and the prompt together
+take less than a fifth of a second.
+
+The answering model was the surprise. It read its prompt at 218 tokens per
+second and wrote at 4.9, a tenth of what the same card achieved once the cause
+was found (Table~\ref{tab:ablation}). The cause was memory. The desktop took
+0.6\,GB of the card, the embedding model, kept there to encode questions,
+2.3\,GB, and Qwen3 8B 5.8\,GB: 8.7\,GB on an 8\,GB card. Windows does not refuse
+such a load. Its display driver lends the card system memory, reported as
+\emph{shared GPU memory}---1.7\,GB here---which the card reaches over the
+PCIe bus at a fraction of the speed of its own. Ollama, which sees only what it
+was granted, reported the model as entirely on the graphics card. Nothing
+failed; everything slowed, which explains the two-minute answers in the log.
+Encoding a question took 11\,ms when measured alone but 174\,ms in the full
+pipeline, which is consistent with the same contention.
+
+\subsection{RQ2: How much faster on the same hardware?}
+
+\begin{table}[t]
+\caption{Qwen3 8B under each change on its own (medians)}
+\label{tab:ablation}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{GPU memory (GB)} & \multicolumn{2}{c}{Tokens/s} & Answer \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Configuration & own & shared & read & write & (s) \\
+\midrule
+As deployed                     & 7.5 & 1.7 &   218 &  4.9 & 35.0 \\
+8-bit key--value cache          & 7.6 & 1.2 &   200 &  6.8 & 32.1 \\
+Encoder in half precision       & 7.5 & 0.7 &   462 & 41.0 & 10.9 \\
+Encoder on the processor        & 6.5 & 0.5 & 2{,}342 & 44.2 & 3.8 \\
+\quad and 8-bit cache           & 5.9 & 0.5 & 2{,}281 & 44.3 & 3.7 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\parbox{\columnwidth}{\scriptsize Memory with the model loaded; about 0.5\,GB is
+shared even when everything fits, without slowing it. Answer: time to the
+complete answer.}
+\end{table}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{results-ablation}
+\caption{Qwen3 8B under each change on its own (data in Table~\ref{tab:ablation}).
+As deployed, the card's own memory is full and Windows lends it 1.7\,GB of
+system memory; the model then reads its prompt at a tenth of its speed. Moving
+the question encoder to the processor (blue) removes the slowdown; the 8-bit
+cache adds nothing once memory fits.}
+\label{fig:ablation}
+\end{figure*}
+
+\subsubsection{The answering model}
+Table~\ref{tab:ablation} and Fig.~\ref{fig:ablation} vary one factor at a time. Moving the question
+encoder to the processor removed the bottleneck by itself: the prompt was read
+11 times faster and the answer written 9 times faster, so the complete answer
+came after 3.8\,s instead of 35.0\,s, and the first word after 1.9\,s instead
+of 18.5\,s. Encoding a question on the processor costs 44\,ms instead of
+11\,ms, which no user can notice, and changes nothing downstream: the same 40
+candidates come back, and 99.6\,\% of the 24 passed to re-scoring are the same.
+Half precision on the card (1.2\,GB) was not enough. Ollama's 8-bit key--value
+cache, which saves 0.5\,GB, did not help while the encoder stayed on the card,
+and changed nothing once it had left; as it also costs some
+precision~\cite{ollama}, we left it off. None of the changes affected the
+answers' grounding: all 250 answers cited their sources, none cited a passage
+that does not exist, and none quoted a figure missing from its passages.
+
+\subsubsection{Re-scoring}
+Compiled with OpenVINO and quantised to 8-bit integers, the reranker scored the
+24 passages in 3.1\,s instead of 9.4\,s (95th percentile 4.0\,s instead of
+11.0\,s), a threefold speed-up, and chose the same six passages in 95\,\% of
+cases---on average 5.7 of the six, from identical candidates. That met the
+90\,\% bar, and it is now the default; if its compiled model is missing, the
+system falls back to PyTorch.
+
+\subsubsection{Search and storage}
+Both searches together took 26\,ms per question: 1.8\,ms to compare the
+question exactly with all 22{,}944 vectors, and 24\,ms for the keyword search.
+That is under half a per cent even of the improved time. Replacing the NumPy
+matrix with an approximate index, or FTS5 with another BM25 engine, could
+therefore save no time a user would notice, while an approximate index would
+start to lose recall; both stores were kept.
+
+\begin{table}[t]
+\caption{End to end through the system's own code (s)}
+\label{tab:e2e}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{As deployed} & \multicolumn{2}{c}{Improved} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Milestone & median & p95 & median & p95 \\
+\midrule
+Evidence cards shown  & TODO & TODO & TODO & TODO \\
+First word of answer  & TODO & TODO & TODO & TODO \\
+Complete answer       & TODO & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\parbox{\columnwidth}{\scriptsize 5 questions $\times$ 10 timed passes each.
+Improved: question encoder on the processor, 8-bit OpenVINO reranker; same
+models, same Ollama settings.}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/results-endtoend.pdf}{%
+  \includegraphics[width=\columnwidth]{results-endtoend}}{%
+  \fbox{\parbox[c][2.6cm][c]{0.92\columnwidth}{\centering\footnotesize
+    Chart pending: the end-to-end run is still in progress.}}}
+\caption{Where a question's time goes, as deployed and improved: mean seconds
+until the evidence cards (search and re-scoring), then until the first word
+(the model reads its prompt), then until the answer is complete (the model
+writes). Medians and 95th percentiles are in Table~\ref{tab:e2e}.}
+\label{fig:e2e}
+\end{figure}
+
+\subsubsection{End to end}
+TODO-E2E
+
+\subsection{RQ3: Can a smaller model replace the default?}
+
+\begin{table}[t]
+\caption{Qwen3 8B against Qwen3.5 4B, encoder on the processor}
+\label{tab:qwen}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & Qwen3 8B & Qwen3.5 4B \\
+\midrule
+GPU memory of the model               & 5.8\,GB & 3.1\,GB \\
+Reading / writing (tokens/s)          & 2{,}342 / 44 & 3{,}697 / 72 \\
+Answer length (tokens, median)        & 82 & 266 \\
+First word / complete answer (s)      & 1.9 / 3.8 & 0.9 / 4.6 \\
+\midrule
+Answers with citations                & 50/50 & 50/50 \\
+Citations to missing passages         & 0 & 0 \\
+Refusals                              & 0 & 0 \\
+Figures quoted / not in passages      & 72 / 0 & 323 / 0 \\
+Distinct answers per 10 repeats       & 3.0 & 9.2 \\
+Wrong course codes (Q12)$^{a}$        & 0/30 & 17/20 \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\parbox{\columnwidth}{\scriptsize Five questions $\times$ ten answers; Qwen3.5
+4B with the 8-bit cache, which changes its memory by 0.1\,GB.
+$^{a}$Over all runs of each model: three of Qwen3 8B, two of Qwen3.5 4B.}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{results-models}
+\caption{Qwen3 8B against Qwen3.5 4B, question encoder on the processor. The
+smaller model starts sooner but writes three times as much, and named the
+wrong course codes in most answers to the machine-learning question (Q12),
+which the mechanical checks did not catch.}
+\label{fig:models}
+\end{figure}
+
+Qwen3.5 4B starts faster (Table~\ref{tab:qwen}, Fig.~\ref{fig:models}): its first word arrives after
+0.9\,s rather than 1.9\,s, it writes 72 tokens a second rather than 44, and at
+3.1\,GB it fits even beside the encoder on the card, where it is just as fast.
+But it writes three times as much, so its complete answer takes longer. On the
+mechanical checks the two cannot be told apart. Every answer cites; none cites
+a passage that does not exist; none refuses. Qwen3.5 quoted 323 figures in
+each of its two runs, more than four times as many as Qwen3 8B, and all of
+them are in its passages but one: an academic year, ``25/26'', written out in
+full. By the rule fixed in advance, the smaller model would win.
+
+Reading the answers against their passages reversed the verdict. Asked which
+courses cover machine learning, Qwen3.5 answered in 17 of 20 answers that they
+were two course codes that the passage lists only as courses taught
+differently in each specialisation, without saying what they teach; some
+answers also gave the machine-learning course the wrong one of the three codes.
+Qwen3 8B named a wrong code in none of its 30 answers.
+Each wrong code \emph{is} in the passage, so the figure check passes it: a
+correct figure attached to the wrong subject is exactly the error a mechanical
+check cannot see. Qwen3.5's answers also varied more, with 9.2 different texts
+in ten repetitions of a question against 3.0. In an audited setting, a model
+that can be confidently wrong about which course is which is not worth a
+second saved, so Qwen3 8B remains the default.
+
+\subsection{Threats to validity}
+Overlap@6 measures agreement with the deployed system, not retrieval quality:
+there are no labelled relevant passages, so a change that alters 5\,\% of the
+passages may help or harm. The grounding and figure checks are mechanical, and
+the reading of answers was done by one reader, not blind to the model. Twenty
+questions---five for the answering model---on one machine and one corpus
+cannot show how the results vary across question types or hardware; the
+memory finding, in particular, depends on what else is on the screen. The
+unique line added to each prompt is a dozen tokens, and conversations in real
+use add up to 2{,}500 characters of history, which was not measured.
 
 %% ===========================================================================
 \section{Limitations and Lessons}
 \label{sec:limits}
 
-\emph{No formal evaluation yet.} We have not measured retrieval recall, answer
-correctness or citation precision against a labelled set of questions. The
-natural next step is to draw a few hundred questions from the accreditation
-instrument, mark the passages that answer each, and measure every retrieval
-stage separately alongside citation quality~\cite{alce}. The checkability of
-each answer (R1) mitigates, but does not replace, such a study.
+\emph{No correctness evaluation yet.} The evaluation measured speed,
+agreement and mechanical grounding, not retrieval recall, answer correctness
+or citation precision against a labelled set of questions. The natural next
+step is to draw a few hundred questions from the accreditation instrument,
+mark the passages that answer each, and measure every retrieval stage
+separately alongside citation quality~\cite{alce}. The checkability of each
+answer (R1) mitigates, but does not replace, such a study. Re-scoring, at
+3.1\,s, is now the slowest stage, and the six passages often include the same
+text twice, from copies of one document; removing such duplicates would give
+the model more evidence for the same prompt length.
 
 \emph{Other limits.} Legacy \texttt{.doc} and \texttt{.xls} files are not read;
 OCR misreads digits on poor scans; web snapshots go stale until refreshed; the
@@ -534,8 +879,11 @@ of who asked what, so the guest password must be shared only within the team.
 \emph{Lessons.} Remembering where every passage came from costs almost nothing,
 and is what makes answers checkable. Search by meaning alone was not enough for
 a corpus dense with identifiers. A network drive's failure modes look like
-legitimate deletions. And the slowest step of a request should never be tied to
-a single connection.
+legitimate deletions. The slowest step of a request should never be tied to a
+single connection. An over-full graphics card under Windows does not fail; it
+slows down without warning, so memory must be measured, not just speed. And
+mechanical checks of grounding are necessary but not sufficient: they rated a
+model that misattributed facts as faultless.
 
 %% ===========================================================================
 \section{Conclusion}
@@ -544,12 +892,14 @@ An accreditation team can have a question-answering assistant whose answers are
 \emph{checkable by construction}---built from its own documents, citing them by
 page, sheet or slide, leaving them untouched, and running on hardware the
 department already owns. None of its components is new; the value lies in how
-they are fitted to an audited, confidential and constantly changing archive. The
+they are fitted to an audited, confidential and constantly changing archive.
+Measuring it stage by stage paid off: the largest speed-up came not from a
+faster model but from moving a 2\,GB model off the graphics card. The
 approach transfers to any organisation that must justify claims from a large,
 messy, authoritative collection of documents.
 
 %% ===========================================================================
-\begin{thebibliography}{14}
+\begin{thebibliography}{19}
 \footnotesize
 
 \bibitem{ji}
@@ -616,6 +966,35 @@ A. Yang \emph{et al.} (Qwen Team), ``Qwen3 technical report,'' arXiv:2505.09388,
 \bibitem{fts5}
 SQLite Consortium, ``SQLite FTS5 extension.'' [Online]. Available:
 \url{https://www.sqlite.org/fts5.html}
+
+\bibitem{nncf}
+A. Kozlov, I. Lazarevich, V. Shamporov, N. Lyalyushkin, and Y. Gorbachev,
+``Neural network compression framework for fast model inference,''
+arXiv:2002.08679, 2020. [Online]. Available:
+\url{https://arxiv.org/abs/2002.08679}
+
+\bibitem{faiss}
+M. Douze \emph{et al.}, ``The Faiss library,'' arXiv:2401.08281, 2024.
+[Online]. Available: \url{https://arxiv.org/abs/2401.08281}
+
+\bibitem{bm25s}
+X. H. L\`u, ``BM25S: Orders of magnitude faster lexical search via eager sparse
+scoring,'' arXiv:2407.03618, 2024. [Online]. Available:
+\url{https://arxiv.org/abs/2407.03618}
+
+\bibitem{ollama}
+Ollama, ``FAQ: flash attention and key/value cache quantization.'' [Online].
+Available: \url{https://github.com/ollama/ollama/blob/main/docs/faq.mdx}
+
+\bibitem{qwen35}
+Qwen Team, ``Qwen3.5-4B,'' model card, Hugging Face, 2026. [Online].
+Available: \url{https://huggingface.co/Qwen/Qwen3.5-4B}
+
+\bibitem{seahelm}
+Y. Susanto \emph{et al.}, ``SEA-HELM: Southeast Asian holistic evaluation of
+language models,'' in \emph{Findings of ACL}, 2025, pp. 12308--12336; scores
+from its Indonesian leaderboard, 20 Nov. 2026. [Online]. Available:
+\url{https://leaderboard.sea-lion.ai/detailed/ID}
 
 \end{thebibliography}
 

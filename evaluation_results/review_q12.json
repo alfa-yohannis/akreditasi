@@ -1,0 +1,14 @@
+{
+ "kind": "manual_review",
+ "created": "2026-11-21",
+ "question": "q12",
+ "criterion": "The answer names, as the course(s) that cover machine learning, course codes that its six passages do not link to machine learning. The passage gives one code for that course; two other codes appear beside it only as examples of courses taught differently per specialisation. A wrong code is in the passages, so the figure check (faithfulness_*.json) does not flag it.",
+ "method": "Every timed answer to q12 of each run was read against its six passages; answers naming either of the two unlinked codes as a machine-learning course were counted. Read by one reader, not blind to the model.",
+ "runs": {
+  "answer-qwen3-8b-default":   {"answers": 10, "wrong_codes": 0},
+  "answer-qwen3-8b-embed-cpu": {"answers": 10, "wrong_codes": 0},
+  "answer-qwen3-8b-tuned":     {"answers": 10, "wrong_codes": 0},
+  "answer-qwen3.5-4b-default": {"answers": 10, "wrong_codes": 7},
+  "answer-qwen3.5-4b-tuned":   {"answers": 10, "wrong_codes": 10}
+ }
+}

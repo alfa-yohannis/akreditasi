@@ -46,11 +46,11 @@ digraph architecture {
       // already group the models
       peripheries=0; margin=5;
       llm      [fillcolor="#FFE4D4", color="black",
-                label=<<B>Answering model</B><BR/><FONT POINT-SIZE="6.5">Qwen3 8B via Ollama · GPU · 5.0 GB</FONT>>];
+                label=<<B>Answering model</B><BR/><FONT POINT-SIZE="6.5">Qwen3 8B via Ollama · GPU · 5.8 GB</FONT>>];
       embedder [fillcolor="#FFE4D4", color="black",
-                label=<<B>Embedding model</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 · GPU · 1.2 GB</FONT>>];
+                label=<<B>Embedding model</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 · GPU to index,<BR/>CPU to ask</FONT>>];
       reranker [fillcolor="#FFE4D4", color="black",
-                label=<<B>Reranking model</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3<BR/>CPU · 1.1 GB</FONT>>];
+                label=<<B>Reranking model</B><BR/><FONT POINT-SIZE="6.5">BGE-reranker-v2-m3<BR/>CPU · OpenVINO int8</FONT>>];
     }
 
     subgraph cluster_index {
