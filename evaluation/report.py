@@ -1,8 +1,8 @@
 """Collect every benchmark result into one comparison.
 
-Reads ``evaluation_results/pipeline_*.json`` (and ``vectors_*.json``,
-``stores_*.json`` when present) and writes ``evaluation_results/summary.md``
-and ``evaluation_results/summary.csv``.
+Reads ``evaluation_results/pipeline_*.json``, ``answering_*.json`` and
+``endtoend_*.json`` (and ``vectors_*.json`` when present) and writes
+``evaluation_results/summary.md`` and ``evaluation_results/summary.csv``.
 
 Agreement with the baseline is reported as *overlap@6*: the share of the six
 passages the baseline hands to the answering model that a configuration also
@@ -148,6 +148,74 @@ def main() -> None:
                         "llm_output_tokens_per_s_median": round(s["output_tokens_per_s"]["median"], 2),
                     })
 
+    if any(pipelines[label].get("llm_summary") for label in ordered):
+        lines += ["", "> The answering-model rows above repeat one prompt per question, so "
+                  "Ollama reuses its cached prompt work and *first token* is unrealistically "
+                  "short. The sections below send a fresh prompt every time."]
+
+    # --- answering model alone ----------------------------------------------
+    answering = latest_runs("answering_*.json")
+    answering = {label: run for label, run in answering.items() if not label.startswith("diag-")}
+    if answering:
+        lines += ["", "## Answering model alone (fresh prompt each time; median, p95 in brackets)", "",
+                  "Same six passages per question as the baseline; 5 questions × 10 timed passes.", "",
+                  "| configuration | model | Ollama | embedder held | GPU dedicated / shared (MiB) | "
+                  "first token (s) | total (s) | prompt tok/s | output tok/s | output tokens | "
+                  "cited | invalid cites | refusals | missing-detail notes | distinct passages cited |",
+                  "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        for label in sorted(answering, key=lambda k: (answering[k]["configuration"]["model"], k)):
+            run = answering[label]
+            configuration, s = run["configuration"], run["llm_summary"]
+            timed = [x for x in run["llm_samples"] if not x["warmup"]]
+            memory = run["gpu_memory"].get("with_model", {})
+            lines.append(
+                f"| {label} | {configuration['model']} | {configuration['ollama_env']} | "
+                f"{configuration['resident_embedder']} | "
+                f"{memory.get('dedicated_mib', '–')} / {memory.get('shared_mib', '–')} | "
+                f"{fmt(s['first_token_ms']['median'] / 1000, 1)} ({fmt(s['first_token_ms']['p95'] / 1000, 1)}) | "
+                f"{fmt(s['total_ms']['median'] / 1000, 1)} ({fmt(s['total_ms']['p95'] / 1000, 1)}) | "
+                f"{fmt(s['prompt_tokens_per_s']['median'], 0)} | {fmt(s['output_tokens_per_s']['median'], 1)} | "
+                f"{fmt(s['output_tokens']['median'], 0)} | "
+                f"{sum(x['has_citation'] for x in timed)}/{len(timed)} | "
+                f"{sum(x['invalid_citations'] for x in timed)} | "
+                f"{sum(x.get('refuses', False) for x in timed)} | "
+                f"{sum(x.get('notes_missing_detail', False) for x in timed)} | "
+                f"{fmt(sum(x['distinct_passages_cited'] for x in timed) / len(timed), 1)} |")
+            csv_rows.append({
+                "configuration": label, "file": run["_file"], "llm": configuration["model"],
+                "ollama_env": configuration["ollama_env"],
+                "resident_embedder": configuration["resident_embedder"],
+                "gpu_dedicated_mib": memory.get("dedicated_mib"), "gpu_shared_mib": memory.get("shared_mib"),
+                "llm_first_token_median_ms": round(s["first_token_ms"]["median"], 1),
+                "llm_total_median_ms": round(s["total_ms"]["median"], 1),
+                "llm_total_p95_ms": round(s["total_ms"]["p95"], 1),
+                "llm_prompt_tokens_per_s_median": round(s["prompt_tokens_per_s"]["median"], 1),
+                "llm_output_tokens_per_s_median": round(s["output_tokens_per_s"]["median"], 2),
+                "llm_output_tokens_median": s["output_tokens"]["median"],
+                "answers_refusing": sum(x.get("refuses", False) for x in timed),
+                "answers_invalid_citations": sum(x["invalid_citations"] for x in timed),
+            })
+
+    # --- end to end ------------------------------------------------------------
+    end_to_end = latest_runs("endtoend_*.json")
+    if end_to_end:
+        lines += ["", "## End to end, through the app's own code (median s, p95 in brackets)", "",
+                  "| configuration | reranker | question embedding | model | evidence cards | "
+                  "first word | complete answer | errors | refusals |",
+                  "|---|---|---|---|---:|---:|---:|---:|---:|"]
+        for label, run in end_to_end.items():
+            s, resolved = run["summary_ms"], run["resolved"]
+            timed = [x for x in run["llm_samples"] if not x["warmup"]]
+            cell = lambda key: (f"{fmt(s[key]['median'] / 1000, 1)} ({fmt(s[key]['p95'] / 1000, 1)})"  # noqa: E731
+                                if s.get(key) else "–")
+            lines.append(
+                f"| {label} | {resolved['reranking_backend']} | {resolved['query_embedding_device']} | "
+                f"{resolved['ollama_model']} | {cell('cards_ms')} | {cell('first_token_ms')} | "
+                f"{cell('done_ms')} | {sum(bool(x.get('error')) for x in timed)} | "
+                f"{sum(x.get('refuses', False) for x in timed)} |")
+            csv_rows.append({"configuration": label, "file": run["_file"],
+                             **{f"{key}_median_ms": round(s[key]["median"], 1) for key in s if s[key]}})
+
     # --- re-embedding throughput ----------------------------------------------
     vectors = latest_runs("vectors_*.json")
     if vectors:
@@ -161,6 +229,8 @@ def main() -> None:
                          f"{fmt(record['peak_gpu_memory_gib'], 2)} |")
 
     lines += ["", "## Files", ""] + [f"- `{pipelines[label]['_file']}` ({label})" for label in ordered]
+    lines += [f"- `{run['_file']}` ({label})" for runs in (answering, end_to_end)
+              for label, run in runs.items()]
     (RESULTS_DIRECTORY / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     fieldnames = sorted({key for row in csv_rows for key in row},

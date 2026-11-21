@@ -15,6 +15,9 @@ The question set follows the same rule: ``evaluation/queries.private.json``
 
     .venv\\Scripts\\python.exe -m evaluation.privacy evaluation_results\\pipeline_x.json
     splits an existing result file in place.
+
+    .venv\\Scripts\\python.exe -m evaluation.privacy --regrade evaluation_results\\answering_x.json
+    recomputes the grounding checks of a public file from its private answers.
 """
 from __future__ import annotations
 
@@ -41,17 +44,52 @@ def queries_path() -> Path:
     return PRIVATE_QUERIES if PRIVATE_QUERIES.exists() else PUBLIC_QUERIES
 
 
+#: A refusal opens with the not-found sentence; later in an answer, the same
+#: words only flag one missing detail ("... rincian indikatornya tidak
+#: ditemukan pada dokumen yang terindeks").
+REFUSAL_WITHIN_CHARACTERS = 80
+
+
 def grounding_checks(answer: str, passage_count: int = 6) -> dict:
-    """Mechanical checks of one answer that reveal nothing of its content."""
+    """Mechanical checks of one answer that reveal nothing of its content.
+
+    ``says_not_found`` is the raw phrase match. It is split into ``refuses``
+    (the answer opens with the not-found sentence, or cites nothing) and
+    ``notes_missing_detail`` (a cited answer that adds the sentence about one
+    sub-question), because the two mean opposite things for grounding.
+    """
     cited = [int(number) for number in CITATION.findall(answer)]
+    position = answer.lower().find(NOT_FOUND)
+    says_not_found = position >= 0
+    refuses = says_not_found and (position < REFUSAL_WITHIN_CHARACTERS or not cited)
     return {
         "characters": len(answer),
         "citation_markers": len(cited),
         "distinct_passages_cited": len(set(cited)),
         "invalid_citations": sum(1 for n in cited if n < 1 or n > passage_count),
         "has_citation": bool(cited),
-        "says_not_found": NOT_FOUND in answer.lower(),
+        "says_not_found": says_not_found,
+        "refuses": refuses,
+        "notes_missing_detail": says_not_found and not refuses,
     }
+
+
+def regrade(public_path: Path) -> int:
+    """Recompute the grounding checks of a public file from its private twin."""
+    private_path = PRIVATE_DIRECTORY / public_path.name
+    if not private_path.exists():
+        return 0
+    public = json.loads(public_path.read_text(encoding="utf-8"))
+    answers = json.loads(private_path.read_text(encoding="utf-8"))["answers"]
+    samples = public.get("llm_samples", [])
+    if len(samples) != len(answers):
+        raise ValueError(f"{public_path.name}: {len(samples)} samples, {len(answers)} answers")
+    for sample, entry in zip(samples, answers):
+        if (sample.get("query_id"), sample.get("repetition")) != (entry["query_id"], entry["repetition"]):
+            raise ValueError(f"{public_path.name}: samples and answers are out of step")
+        sample.update(grounding_checks(entry["answer"]))
+    public_path.write_text(json.dumps(public, indent=1, ensure_ascii=False), encoding="utf-8")
+    return len(samples)
 
 
 def split(result: dict) -> tuple[dict, dict]:
@@ -85,6 +123,10 @@ def write_split(result: dict, filename: str) -> Path:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--regrade"]:
+        for argument in sys.argv[2:]:
+            print(f"regraded {regrade(Path(argument))} answers in {Path(argument).name}")
+        sys.exit(0)
     for argument in sys.argv[1:]:
         source = Path(argument)
         data = json.loads(source.read_text(encoding="utf-8"))

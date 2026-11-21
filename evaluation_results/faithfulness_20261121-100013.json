@@ -1,0 +1,286 @@
+{
+ "created": "2026-11-21T10:00:13",
+ "method": "The prompt tells the model to quote numbers, names and decree numbers exactly, and only from the six passages. This checks the part of that rule a program can check without labelled answers: every *figure* in an answer -- a number of two or more digits (years, counts, percentages, page numbers), a decimal, or a code mixing letters and digits (course codes, decree numbers) -- must appear in the six passages, their document names and locations, or the question itself.",
+ "runs": {
+  "answer-qwen3-8b-default": {
+   "file": "answering_answer-qwen3-8b-default_20261120-181322.json",
+   "answers": 50,
+   "figures": 68,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 20,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 0,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 8,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 30,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3-8b-embed-cpu": {
+   "file": "answering_answer-qwen3-8b-embed-cpu_20261120-184328.json",
+   "answers": 50,
+   "figures": 72,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 21,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 0,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 11,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 30,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3-8b-embed-fp16": {
+   "file": "answering_answer-qwen3-8b-embed-fp16_20261120-183532.json",
+   "answers": 50,
+   "figures": 67,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 20,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 0,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 7,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 30,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3-8b-kv-q8": {
+   "file": "answering_answer-qwen3-8b-kv-q8_20261120-192605.json",
+   "answers": 50,
+   "figures": 66,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 19,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 0,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 7,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 30,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3-8b-tuned": {
+   "file": "answering_answer-qwen3-8b-tuned_20261120-193308.json",
+   "answers": 50,
+   "figures": 68,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 20,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 0,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 8,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 30,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3.5-4b-default": {
+   "file": "answering_answer-qwen3.5-4b-default_20261121-095707.json",
+   "answers": 50,
+   "figures": 323,
+   "unsupported": 1,
+   "unsupported_share": 0.0030959752321981426,
+   "answers_with_unsupported": 1,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 91,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 119,
+     "unsupported": 1,
+     "answers_with_unsupported": 1
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 18,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 85,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  },
+  "answer-qwen3.5-4b-tuned": {
+   "file": "answering_answer-qwen3.5-4b-tuned_20261120-193933.json",
+   "answers": 50,
+   "figures": 323,
+   "unsupported": 0,
+   "unsupported_share": 0.0,
+   "answers_with_unsupported": 0,
+   "by_question": {
+    "q01": {
+     "answers": 10,
+     "figures": 76,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q04": {
+     "answers": 10,
+     "figures": 133,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q09": {
+     "answers": 10,
+     "figures": 10,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q12": {
+     "answers": 10,
+     "figures": 23,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    },
+    "q17": {
+     "answers": 10,
+     "figures": 81,
+     "unsupported": 0,
+     "answers_with_unsupported": 0
+    }
+   }
+  }
+ }
+}

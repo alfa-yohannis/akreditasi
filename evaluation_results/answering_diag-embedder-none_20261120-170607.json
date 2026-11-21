@@ -1,0 +1,246 @@
+{
+ "kind": "answering",
+ "label": "diag-embedder-none",
+ "created": "2026-11-20T17:01:49",
+ "machine": {
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "python": "3.12.0",
+  "numpy": "2.5.2",
+  "torch": "2.11.0+cu128",
+  "sentence_transformers": "6.0.0",
+  "transformers": "5.15.1",
+  "torch_threads": 20,
+  "cuda": true,
+  "gpu": "NVIDIA GeForce RTX 4060",
+  "gpu_memory_gib": 8.0
+ },
+ "configuration": {
+  "label": "diag-embedder-none",
+  "model": "qwen3:8b",
+  "baseline": "evaluation_results\\pipeline_baseline_20261120-164319.json",
+  "query_ids": "q01,q09",
+  "warmup": 1,
+  "repeats": 1,
+  "resident_embedder": "none",
+  "ollama_url": "http://127.0.0.1:11434",
+  "other_ollama_url": null,
+  "ollama_env": "default",
+  "num_predict": 1536,
+  "keep_alive": "10m",
+  "seed": 0,
+  "no_cache_busting": false
+ },
+ "settings": {
+  "num_ctx": 8192,
+  "temperature": 0.2,
+  "num_predict": 1536
+ },
+ "gpu_memory": {
+  "idle": {
+   "dedicated_mib": 618,
+   "shared_mib": 13
+  },
+  "idle_nvidia_smi_mib": 612,
+  "with_embedder": {
+   "dedicated_mib": 623,
+   "shared_mib": 14
+  },
+  "with_model": {
+   "dedicated_mib": 6663,
+   "shared_mib": 468
+  },
+  "with_model_nvidia_smi_mib": 6656
+ },
+ "ollama_residency": {
+  "size_mib": 5908,
+  "vram_mib": 5908,
+  "share_on_gpu": 1.0,
+  "context_length": 8192
+ },
+ "llm_summary": {
+  "first_token_ms": {
+   "n": 2,
+   "mean": 1978.57,
+   "median": 1978.57,
+   "p95": 2024.6644,
+   "min": 1932.4756,
+   "max": 2024.6644,
+   "stdev": 65.18732562945033
+  },
+  "total_ms": {
+   "n": 2,
+   "mean": 3281.3455000000004,
+   "median": 3281.3455000000004,
+   "p95": 3790.7024,
+   "min": 2771.9886,
+   "max": 3790.7024,
+   "stdev": 720.3394360683163
+  },
+  "prompt_eval_ms": {
+   "n": 2,
+   "mean": 1780.0349999999999,
+   "median": 1780.0349999999999,
+   "p95": 1856.912,
+   "min": 1703.158,
+   "max": 1856.912,
+   "stdev": 108.72049603455652
+  },
+  "generation_ms": {
+   "n": 2,
+   "mean": 1302.597,
+   "median": 1302.597,
+   "p95": 1858.31,
+   "min": 746.884,
+   "max": 1858.31,
+   "stdev": 785.8968613870397
+  },
+  "prompt_tokens": {
+   "n": 2,
+   "mean": 4162.5,
+   "median": 4162.5,
+   "p95": 4344,
+   "min": 3981,
+   "max": 4344,
+   "stdev": 256.6797615707168
+  },
+  "output_tokens": {
+   "n": 2,
+   "mean": 57.5,
+   "median": 57.5,
+   "p95": 82,
+   "min": 33,
+   "max": 82,
+   "stdev": 34.64823227814083
+  },
+  "prompt_tokens_per_s": {
+   "n": 2,
+   "mean": 2338.3951620725347,
+   "median": 2338.3951620725347,
+   "p95": 2339.367724480212,
+   "min": 2337.422599664858,
+   "max": 2339.367724480212,
+   "stdev": 1.3754109471911293
+  },
+  "output_tokens_per_s": {
+   "n": 2,
+   "mean": 44.15484129257906,
+   "median": 44.15484129257906,
+   "p95": 44.183567997172254,
+   "min": 44.12611458798586,
+   "max": 44.183567997172254,
+   "stdev": 0.04062569523798458
+  },
+  "load_ms": {
+   "n": 2,
+   "mean": 2.9510500000000004,
+   "median": 2.9510500000000004,
+   "p95": 3.0068,
+   "min": 2.8953,
+   "max": 3.0068,
+   "stdev": 0.0788424061023
+  }
+ },
+ "llm_samples": [
+  {
+   "first_token_ms": 4362.0146,
+   "total_ms": 5134.8729,
+   "load_ms": 2410.0814,
+   "prompt_tokens": 4344,
+   "prompt_eval_ms": 1915.801,
+   "prompt_tokens_per_s": 2267.45888534352,
+   "output_tokens": 33,
+   "generation_ms": 772.868,
+   "output_tokens_per_s": 42.698106274292634,
+   "done_reason": "stop",
+   "query_id": "q01",
+   "warmup": true,
+   "repetition": -1,
+   "characters": 76,
+   "citation_markers": 4,
+   "distinct_passages_cited": 4,
+   "invalid_citations": 0,
+   "has_citation": true,
+   "says_not_found": false,
+   "refuses": false,
+   "notes_missing_detail": false
+  },
+  {
+   "first_token_ms": 1874.0997,
+   "total_ms": 3727.5563,
+   "load_ms": 4.8362,
+   "prompt_tokens": 3982,
+   "prompt_eval_ms": 1703.252,
+   "prompt_tokens_per_s": 2337.880712895097,
+   "output_tokens": 82,
+   "generation_ms": 1853.675,
+   "output_tokens_per_s": 44.2364492157471,
+   "done_reason": "stop",
+   "query_id": "q09",
+   "warmup": true,
+   "repetition": -1,
+   "characters": 250,
+   "citation_markers": 6,
+   "distinct_passages_cited": 6,
+   "invalid_citations": 0,
+   "has_citation": true,
+   "says_not_found": false,
+   "refuses": false,
+   "notes_missing_detail": false
+  },
+  {
+   "first_token_ms": 2024.6644,
+   "total_ms": 2771.9886,
+   "load_ms": 2.8953,
+   "prompt_tokens": 4344,
+   "prompt_eval_ms": 1856.912,
+   "prompt_tokens_per_s": 2339.367724480212,
+   "output_tokens": 33,
+   "generation_ms": 746.884,
+   "output_tokens_per_s": 44.183567997172254,
+   "done_reason": "stop",
+   "query_id": "q01",
+   "warmup": false,
+   "repetition": 0,
+   "characters": 76,
+   "citation_markers": 4,
+   "distinct_passages_cited": 4,
+   "invalid_citations": 0,
+   "has_citation": true,
+   "says_not_found": false,
+   "refuses": false,
+   "notes_missing_detail": false
+  },
+  {
+   "first_token_ms": 1932.4756,
+   "total_ms": 3790.7024,
+   "load_ms": 3.0068,
+   "prompt_tokens": 3981,
+   "prompt_eval_ms": 1703.158,
+   "prompt_tokens_per_s": 2337.422599664858,
+   "output_tokens": 82,
+   "generation_ms": 1858.31,
+   "output_tokens_per_s": 44.12611458798586,
+   "done_reason": "stop",
+   "query_id": "q09",
+   "warmup": false,
+   "repetition": 0,
+   "characters": 250,
+   "citation_markers": 6,
+   "distinct_passages_cited": 6,
+   "invalid_citations": 0,
+   "has_citation": true,
+   "says_not_found": false,
+   "refuses": false,
+   "notes_missing_detail": false
+  }
+ ],
+ "queries": [
+  {
+   "id": "q01"
+  },
+  {
+   "id": "q09"
+  }
+ ]
+}

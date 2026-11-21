@@ -248,19 +248,29 @@ dirancang menyesuaikan batas tersebut:
 
 | Komponen | Model | Memori | Perangkat |
 |---|---|---|---|
-| Penjawab | Qwen3 8B, Q4_K_M | ~5,0 GB | GPU |
-| Embedding | BGE-M3 | ~1,2 GB | GPU |
-| Reranking | BGE-reranker-v2-m3 | ~1,1 GB | **CPU** |
+| Penjawab | Qwen3 8B, Q4_K_M | ~5,8 GB (termasuk konteks 8.192 token) | GPU |
+| Embedding | BGE-M3 | ~2,3 GB | GPU saat indexing, **CPU** untuk pertanyaan |
+| Reranking | BGE-reranker-v2-m3, int8 (OpenVINO) | ~0,6 GB | **CPU** |
 
-Reranker sengaja dijalankan di CPU. Memuat ketiganya ke kartu grafis
-membutuhkan sekitar 7,3 GB sebelum menghitung KV cache, sehingga berisiko gagal
-kehabisan memori **di tengah jawaban** — saat pengguna sudah menunggu. CPU 20
-inti menilai dua puluhan kandidat cukup cepat untuk tidak terasa.
+Hanya model penjawab yang menempati kartu grafis saat melayani pertanyaan.
+Desktop sendiri memakai 0,6–1,1 GB; bila BGE-M3 ikut tinggal di GPU, totalnya
+melebihi 8 GB. Windows tidak menolak — sisanya diam-diam dipinjamkan dari RAM
+sistem (*Shared GPU memory* di Task Manager), dan model bahasa melambat sekitar
+sepuluh kali: jawaban median 35 detik, bukan 3,8 detik. Karena itu pertanyaan
+di-embed di CPU (±44 ms), dan salinan GPU milik indexing dilepas setelah
+indexing selesai. Reranker dijalankan lewat OpenVINO dalam int8: 3,1 detik
+untuk 24 kandidat, dibanding 9,4 detik lewat PyTorch, dengan 95 % pilihan yang
+sama. Rincian pengukurannya ada di
+[`evaluation_results/summary.md`](evaluation_results/summary.md).
 
 Qwen3 8B dipilih dibanding model yang lebih besar karena inilah model terbesar
 yang **seluruhnya** muat di GPU sambil menyisakan ruang untuk konteks RAG yang
 panjang. Model 14B pada Q4 memerlukan ~9 GB, sebagian tumpah ke CPU, dan
 kecepatannya turun menjadi sekitar seperlima untuk jawaban sepanjang ini.
+Qwen3.5 4B yang lebih kecil memang lebih cepat memulai jawaban (0,9 vs 1,9
+detik), tetapi dalam pengujian ia salah menyebut kode mata kuliah pada 17 dari
+20 jawaban untuk satu pertanyaan, sedangkan Qwen3 8B tidak pernah; untuk
+keperluan audit, Qwen3 8B tetap bawaan.
 
 ---
 

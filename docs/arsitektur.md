@@ -126,21 +126,28 @@ metode tidak mendominasi hasil gabungan. Dokumen yang muncul di kedua daftar
 naik di atas dokumen yang hanya disukai satu metode — persis perilaku yang
 diinginkan.
 
-### Mengapa reranker dijalankan di CPU?
+### Mengapa hanya model penjawab yang ada di GPU?
 
-Anggaran VRAM pada RTX 4060 (8 GB):
+Anggaran VRAM pada RTX 4060 (8 GB), diukur (`evaluation_results/`):
 
 | | |
 |---|---|
-| Qwen3 8B Q4_K_M | ~5,0 GB |
-| BGE-M3 | ~1,2 GB |
-| BGE-reranker-v2-m3 | ~1,1 GB |
-| **Jumlah** | **~7,3 GB** |
+| Desktop Windows | ~0,6–1,1 GB |
+| Qwen3 8B Q4_K_M, konteks 8.192 token | ~5,8 GB |
+| BGE-M3 fp32 | ~2,3 GB |
+| BGE-reranker-v2-m3, bila dimuat ke GPU | ~2,3 GB (fp32) |
 
-Tersisa ±0,7 GB untuk KV cache — tidak cukup untuk konteks RAG yang panjang, dan
-kegagalan kehabisan memori akan terjadi **di tengah jawaban**, saat pengguna
-sudah menunggu. Menilai 24 kandidat dengan CPU 20 inti hanya butuh satu sampai
-dua detik, tersembunyi di balik waktu muat model bahasa.
+Desktop dan model penjawab saja sudah memakai ±6,5 GB. Dulu BGE-M3 ikut tinggal
+di GPU untuk meng-embed pertanyaan, sehingga totalnya ±8,7 GB. Windows tidak
+menolak: kelebihannya dipinjamkan dari RAM sistem lewat PCIe (*Shared GPU
+memory*), dan Ollama tetap melaporkan model "100 % GPU". Akibatnya model membaca
+prompt 11× dan menulis 9× lebih lambat — jawaban median 35 detik, bukan 3,8.
+Kini pertanyaan di-embed di CPU (±44 ms alih-alih ±11 ms, dengan kandidat yang
+sama), BGE-M3 hanya memakai GPU selama indexing, dan reranker berjalan di CPU.
+
+Reranker memakai OpenVINO int8: 24 kandidat dinilai dalam ±3,1 detik
+(PyTorch: ±9,4 detik), dengan 95 % pilihan enam passage yang sama. Bila model
+int8 belum dibuat (`main.py convert-reranker`), PyTorch dipakai otomatis.
 
 ### Mengapa Server-Sent Events, bukan WebSocket?
 

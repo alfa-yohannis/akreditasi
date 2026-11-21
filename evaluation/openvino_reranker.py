@@ -106,7 +106,7 @@ def calibration_pairs(count: int, seed: int = 7) -> list[tuple[str, str]]:
     return pairs
 
 
-def export(calibration_size: int) -> None:
+def export(calibration_size: int, directory: Path = OPENVINO_DIRECTORY) -> None:
     """Convert the model to OpenVINO (full precision) and write calibration data."""
     import openvino as ov
     import torch
@@ -127,10 +127,10 @@ def export(calibration_size: int) -> None:
             input=[("input_ids", [-1, -1], ov.Type.i64),
                    ("attention_mask", [-1, -1], ov.Type.i64)],
         )
-    fp32_directory = OPENVINO_DIRECTORY / "fp32"
+    fp32_directory = directory / "fp32"
     fp32_directory.mkdir(parents=True, exist_ok=True)
     ov.save_model(converted, str(fp32_directory / "model.xml"), compress_to_fp16=False)
-    tokenizer.save_pretrained(OPENVINO_DIRECTORY / "tokenizer")
+    tokenizer.save_pretrained(directory / "tokenizer")
 
     # Check the converted model against PyTorch on a few real pairs.
     pairs = calibration_pairs(16, seed=99)
@@ -150,8 +150,38 @@ def export(calibration_size: int) -> None:
         one = tokenizer([question], [passage], truncation=True, max_length=512, return_tensors="np")
         arrays[f"input_ids_{index}"] = one["input_ids"].astype(np.int64)
         arrays[f"attention_mask_{index}"] = one["attention_mask"].astype(np.int64)
-    np.savez_compressed(OPENVINO_DIRECTORY / "calibration.npz", count=np.array(len(samples)), **arrays)
+    np.savez_compressed(directory / "calibration.npz", count=np.array(len(samples)), **arrays)
     print(f"saved {fp32_directory / 'model.xml'} and {len(samples)} calibration pairs")
+
+
+def convert_for_app() -> int:
+    """Build the int8 model the app uses (``RERANK_BACKEND=openvino``), end to end.
+
+    Exports to OpenVINO, then quantises in a separate environment created on
+    first use under ``data/models/openvino/quantize-env`` (NNCF needs an
+    older NumPy than the app), writing ``int8/`` where the app looks for it.
+    """
+    import subprocess
+
+    target = SETTINGS.reranking_openvino_directory
+    directory = target.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    print(f"1/3 Mengekspor {MODEL_ID} ke OpenVINO di {directory} ...")
+    export(300, directory)
+
+    environment = directory.parent / "quantize-env"
+    python = environment / "Scripts" / "python.exe"
+    if not python.exists():
+        print(f"2/3 Menyiapkan lingkungan kuantisasi terpisah di {environment} ...")
+        subprocess.run([sys.executable, "-m", "venv", str(environment)], check=True)
+        subprocess.run([str(python), "-m", "pip", "install", "-q", "openvino", "nncf"], check=True)
+    else:
+        print(f"2/3 Memakai lingkungan kuantisasi yang sudah ada di {environment}")
+    print("3/3 Mengkuantisasi ke int8 (beberapa menit) ...")
+    subprocess.run([str(python), str(Path(__file__).with_name("ov_quantize.py")), str(directory),
+                    target.name], check=True)
+    print(f"Selesai: {target}. Aktifkan dengan RERANK_BACKEND=openvino di .env.")
+    return 0
 
 
 if __name__ == "__main__":

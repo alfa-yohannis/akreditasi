@@ -76,6 +76,10 @@ class CommandLineInterface:
             help="Pakai HTTP biasa saja; lewati browser, login SINTA, dan PDDikti",
         )
 
+        subparsers.add_parser(
+            "convert-reranker",
+            help="Buat model reranking OpenVINO int8 (sekali saja; RERANK_BACKEND=openvino)",
+        )
         subparsers.add_parser("status", help="Tampilkan ringkasan indeks dan backend")
         subparsers.add_parser(
             "hash-password", help="Buat hash kata sandi untuk ADMIN_ atau GUEST_PASSWORD_HASH"
@@ -95,8 +99,15 @@ class CommandLineInterface:
             "status": self._run_status,
             "snapshot": self._run_snapshot,
             "hash-password": self._run_hash_password,
+            "convert-reranker": self._run_convert_reranker,
         }
         return handlers[command](parsed)
+
+    def _run_convert_reranker(self, _parsed: argparse.Namespace) -> int:
+        """Build the int8 OpenVINO reranker into RERANK_OPENVINO_DIR."""
+        from evaluation.openvino_reranker import convert_for_app
+
+        return convert_for_app()
 
     def _run_hash_password(self, _parsed: argparse.Namespace) -> int:
         """Prompt for a password twice and print its hash for `.env`."""
@@ -270,14 +281,14 @@ class CommandLineInterface:
         from app.embeddings import TextEmbedder  # noqa: F401  (warms the import chain)
         from app.ingestion import TEXT_EMBEDDER
         from app.rag import LANGUAGE_MODEL_FACTORY, QuestionRequest, RagEngine
-        from app.retrieval import CROSS_ENCODER_RERANKER, HybridRetriever
+        from app.retrieval import CROSS_ENCODER_RERANKER, QUERY_EMBEDDER, HybridRetriever
         from app.storage import DOCUMENT_CATALOGUE, VECTOR_INDEX
 
         retriever = HybridRetriever(
             settings=SETTINGS,
             catalogue=DOCUMENT_CATALOGUE,
             vector_index=VECTOR_INDEX,
-            embedder=TEXT_EMBEDDER,
+            embedder=QUERY_EMBEDDER,
             reranker=CROSS_ENCODER_RERANKER,
         )
         engine = RagEngine(SETTINGS, retriever, LANGUAGE_MODEL_FACTORY)

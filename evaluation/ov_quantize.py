@@ -17,6 +17,7 @@ in floating point.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import nncf
@@ -27,8 +28,12 @@ DIRECTORY = Path(__file__).resolve().parent.parent / "data" / "eval" / "openvino
 
 
 def main() -> None:
-    model = ov.Core().read_model(str(DIRECTORY / "fp32" / "model.xml"))
-    with np.load(DIRECTORY / "calibration.npz") as archive:
+    # Optional arguments: the model folder (default: the evaluation copy) and
+    # the name of the output folder inside it (default: "int8").
+    directory = Path(sys.argv[1]) if len(sys.argv) > 1 else DIRECTORY
+    output_name = sys.argv[2] if len(sys.argv) > 2 else "int8"
+    model = ov.Core().read_model(str(directory / "fp32" / "model.xml"))
+    with np.load(directory / "calibration.npz") as archive:
         count = int(archive["count"])
         samples = [{"input_ids": archive[f"input_ids_{i}"],
                     "attention_mask": archive[f"attention_mask_{i}"]} for i in range(count)]
@@ -38,7 +43,7 @@ def main() -> None:
         model_type=nncf.ModelType.TRANSFORMER,
         subset_size=len(samples),
     )
-    output = DIRECTORY / "int8"
+    output = directory / output_name
     output.mkdir(exist_ok=True)
     ov.save_model(quantized, str(output / "model.xml"))
     print(f"saved {output / 'model.xml'} from {count} calibration pairs")

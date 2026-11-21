@@ -234,7 +234,31 @@ class OllamaAnswerer:
         self.num_predict = num_predict
         self.keep_alive = keep_alive
 
-    def answer(self, system_prompt: str, user_prompt: str) -> dict:
+    def answer(self, system_prompt: str, user_prompt: str, attempts: int = 3) -> dict:
+        """One timed answer, retried if Ollama fails before answering.
+
+        Ollama 0.40 occasionally answers HTTP 500 when its own connection to
+        the model server has gone idle ("server closed idle connection"); the
+        model is fine and the next request succeeds. Such a request is retried
+        from scratch, so its timing is a clean one, and the retry is recorded.
+        """
+        import requests
+
+        for attempt in range(1, attempts + 1):
+            try:
+                result = self._answer_once(system_prompt, user_prompt)
+            except requests.HTTPError as error:
+                status = error.response.status_code if error.response is not None else None
+                if status != 500 or attempt == attempts:
+                    raise
+                print(f"  Ollama HTTP 500, retrying ({attempt}/{attempts - 1})", flush=True)
+                time.sleep(2)
+                continue
+            result["retries"] = attempt - 1
+            return result
+        raise AssertionError("unreachable")
+
+    def _answer_once(self, system_prompt: str, user_prompt: str) -> dict:
         import requests
 
         payload = {
