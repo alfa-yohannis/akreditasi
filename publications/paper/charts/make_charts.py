@@ -118,6 +118,9 @@ def end_to_end_chart(png: Path | None) -> None:
     names = ["search and re-scoring", "reading the prompt", "writing the answer"]
     colours = [BLUE, ORANGE, AQUA]
     positions = list(range(len(rows)))
+    # Fix the scale first, so the fit test for in-bar labels measures real widths.
+    axis.set_xlim(0, max(sum(segment) for segment in segments) * 1.13)
+    axis.set_ylim(len(rows) - 0.5, -0.5)
     left = [0.0] * len(rows)
     for index, (name, colour) in enumerate(zip(names, colours)):
         widths = [segment[index] for segment in segments]
@@ -129,8 +132,6 @@ def end_to_end_chart(png: Path | None) -> None:
         axis.text(total + max(left) * 0.012, position, f"{total:.1f} s", va="center",
                   ha="left", color=INK, fontsize=7, fontweight="bold")
     axis.set_yticks(positions, [name for name, _ in rows])
-    axis.invert_yaxis()
-    axis.set_xlim(0, max(left) * 1.13)
     axis.set_xlabel("seconds from the question (mean of 50 answers)", color=INK2)
     recessive(axis)
     axis.legend(loc="lower left", bbox_to_anchor=(-0.02, 1.0), ncol=3, handlelength=1.0,

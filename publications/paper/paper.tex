@@ -60,8 +60,8 @@ found the bottleneck in an unexpected place: a model left on the graphics card
 had pushed it past its memory, and Windows silently lent it system memory,
 making the answering model ten times slower. Moving that model to the
 processor and compiling the re-scoring model to 8-bit integers cut the median
-time to a complete answer from about 45 to about 7 seconds on the same
-hardware, without loss of accuracy in our checks; a smaller answering model,
+time to a complete answer from 41.9 to 6.6 seconds on the same hardware,
+without loss of accuracy in our checks; a smaller answering model,
 though faster to start, misattributed facts.
 \end{abstract}
 
@@ -537,8 +537,9 @@ extraction 1{,}306 pages were recognised as scans and 305 of them were
 recovered by OCR. One workstation serves the whole team over the office
 network, desktops and phones alike. Before the changes of
 Section~\ref{sec:results}, local answers in the usage log took 24 to 148
-seconds (median 55); the evidence cards now appear in about TODO-CARDS seconds
-and the first words of the answer after about TODO-FIRST. Cloud models at their
+seconds (median 55); the evidence cards now appear after about 3 seconds, the
+first words of the answer after about 5, and a complete answer after about 7
+(medians). Cloud models at their
 highest reasoning setting typically take 30 to 60 seconds.
 
 %% ===========================================================================
@@ -615,9 +616,10 @@ labs---matches BGE-M3 on Indonesian retrieval~\cite{bge}, so only where and
 at what precision it runs was varied. For re-scoring, the same model was
 compiled with OpenVINO and quantised to 8-bit integers by post-training
 quantisation~\cite{nncf}, calibrated on 300 question--passage pairs drawn from
-the corpus. For the stores, the candidates were approximate
-FAISS~\cite{faiss} indexes and faster BM25 engines~\cite{bm25s}; whether they
-could matter was judged from the measured search times. For answering, Ollama's 8-bit key--value cache was
+the corpus. For the stores, exact NumPy search was compared with exact and
+approximate FAISS~\cite{faiss} and usearch indexes, and FTS5 with the bm25s
+and Tantivy BM25 engines~\cite{bm25s}, all on the twenty questions' real
+vectors and keywords. For answering, Ollama's 8-bit key--value cache was
 tried (flash attention is already on by default~\cite{ollama}), as was
 Qwen3.5 4B~\cite{qwen35}, which matches Qwen3 8B on the Indonesian SEA-HELM
 benchmark (62.7 against 62.5) and exceeds it on extractive question answering,
@@ -733,13 +735,46 @@ cases---on average 5.7 of the six, from identical candidates. That met the
 90\,\% bar, and it is now the default; if its compiled model is missing, the
 system falls back to PyTorch.
 
+\begin{table}[t]
+\caption{Search alternatives on their own, with the twenty questions' vectors}
+\label{tab:stores}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Method & Median (ms) & Same top 40 \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{By meaning, 22{,}944 vectors}} \\
+NumPy, exact (deployed)            & 1.3  & 100\,\% \\
+FAISS, exact$^{a}$                 & 4.2  & 99.6\,\% \\
+FAISS HNSW, $ef$ = 64 / 256        & 0.16 / 0.53 & 95.5 / 99.5\,\% \\
+usearch HNSW, $ef$ = 256           & 0.63 & 98.1\,\% \\
+FAISS binary, rescored 400         & 1.0  & 96.5\,\% \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{By wording}} \\
+FTS5 (deployed)                    & 15.4 & 100\,\% \\
+FTS5, rank before join             & 3.3  & 100\,\% \\
+bm25s, same formula                & 0.59 & 99.4\,\% \\
+Tantivy                            & 0.10 & 95.4\,\% \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\parbox{\columnwidth}{\scriptsize $^{a}$Its Windows build lacks SIMD
+instructions. Ten timed passes after three warm-ups.}
+\end{table}
+
 \subsubsection{Search and storage}
-Both searches together took 26\,ms per question: 1.8\,ms to compare the
-question exactly with all 22{,}944 vectors, and 24\,ms for the keyword search.
-That is under half a per cent even of the improved time. Replacing the NumPy
-matrix with an approximate index, or FTS5 with another BM25 engine, could
-therefore save no time a user would notice, while an approximate index would
-start to lose recall; both stores were kept.
+Both searches together took 26\,ms per question inside the pipeline, under
+half a per cent even of the improved time. Measured on their own
+(Table~\ref{tab:stores}), the exact NumPy search took 1.3\,ms; approximate
+HNSW graphs answered in a fraction of a millisecond but missed 0.5 to
+4.5\,\% of the exact 40, and FAISS's own exact index was slower.
+FTS5 took 15\,ms because the deployed query joins every match to the passage
+table before keeping the best 40; ranking first gives the same 40 in 3.3\,ms.
+Dedicated BM25 engines are faster still but no longer agree exactly. None of
+these differences could be noticed against a 6.6-second answer, so both stores
+were kept, with the rank-first query as a free improvement for later.
 
 \begin{table}[t]
 \caption{End to end through the system's own code (s)}
@@ -752,9 +787,9 @@ start to lose recall; both stores were kept.
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}
 Milestone & median & p95 & median & p95 \\
 \midrule
-Evidence cards shown  & TODO & TODO & TODO & TODO \\
-First word of answer  & TODO & TODO & TODO & TODO \\
-Complete answer       & TODO & TODO & TODO & TODO \\
+Evidence cards shown  & 7.6  & 9.3  & 2.8 & 4.1 \\
+First word of answer  & 26.0 & 31.0 & 4.9 & 6.2 \\
+Complete answer       & 41.9 & 97.5 & 6.6 & 13.4 \\
 \bottomrule
 \end{tabular}
 
@@ -766,19 +801,23 @@ models, same Ollama settings.}
 
 \begin{figure}[t]
 \centering
-\IfFileExists{figures/results-endtoend.pdf}{%
-  \includegraphics[width=\columnwidth]{results-endtoend}}{%
-  \fbox{\parbox[c][2.6cm][c]{0.92\columnwidth}{\centering\footnotesize
-    Chart pending: the end-to-end run is still in progress.}}}
+\includegraphics[width=\columnwidth]{results-endtoend}
 \caption{Where a question's time goes, as deployed and improved: mean seconds
 until the evidence cards (search and re-scoring), then until the first word
 (the model reads its prompt), then until the answer is complete (the model
-writes). Medians and 95th percentiles are in Table~\ref{tab:e2e}.}
+writes); improved: 3.0, 2.2 and 2.9\,s. Medians and 95th percentiles are in
+Table~\ref{tab:e2e}.}
 \label{fig:e2e}
 \end{figure}
 
 \subsubsection{End to end}
-TODO-E2E
+Table~\ref{tab:e2e} and Fig.~\ref{fig:e2e} put both changes together and
+measure what a user experiences, through the system's own answering code. The
+evidence cards now appear after 2.8\,s instead of 7.6\,s, the first word after
+4.9\,s instead of 26.0\,s, and the complete answer after 6.6\,s instead of
+41.9\,s: 6.3 times faster at the median and 7.3 times at the 95th percentile.
+The models, Ollama's settings and the passages the model reads are unchanged.
+Re-scoring, at about 3\,s, is now the largest single stage.
 
 \subsection{RQ3: Can a smaller model replace the default?}
 
@@ -853,7 +892,11 @@ questions---five for the answering model---on one machine and one corpus
 cannot show how the results vary across question types or hardware; the
 memory finding, in particular, depends on what else is on the screen. The
 unique line added to each prompt is a dozen tokens, and conversations in real
-use add up to 2{,}500 characters of history, which was not measured.
+use add up to 2{,}500 characters of history, which was not measured. The
+system stayed in service during the end-to-end runs: seven of the 50 timed
+answers as deployed overlapped a software installation on the same machine,
+and one colleague's question overlapped at most one improved answer; leaving
+those seven out moves no median by more than 0.2\,s.
 
 %% ===========================================================================
 \section{Limitations and Lessons}
