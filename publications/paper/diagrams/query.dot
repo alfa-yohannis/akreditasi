@@ -16,7 +16,7 @@ digraph query {
   meaning  [fillcolor="#DDEBF9", color="black",
             label=<<B>By meaning</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 vector, exact<BR/>cosine over all passages</FONT>>];
   wording  [fillcolor="#DDEBF9", color="black",
-            label=<<B>By wording</B><BR/><FONT POINT-SIZE="6.5">keywords, stop-words<BR/>dropped; FTS5 BM25</FONT>>];
+            label=<<B>By wording</B><BR/><FONT POINT-SIZE="6.5">BM25 ranking in SQLite FTS5;<BR/>stop-words dropped</FONT>>];
 
   fuse     [fillcolor="#DDEBF9", color="black",
             label=<<B>Reciprocal rank fusion</B><BR/><FONT POINT-SIZE="6.5">score(p) = Σ 1 / (60 + rank of p)</FONT>>];

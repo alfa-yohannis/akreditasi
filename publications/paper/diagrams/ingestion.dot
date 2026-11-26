@@ -36,7 +36,7 @@ digraph ingestion {
 
   // two separate stores, joined only by the passage id
   catalogue [shape=cylinder, style="filled", fillcolor="#ECE6F8", color="black", margin="0.06,0.05",
-             label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite: text, location,<BR/>FTS5 keyword index</FONT>>];
+             label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite: text, location,<BR/>FTS5 index for BM25</FONT>>];
   vectors   [shape=note, style="filled", fillcolor="#ECE6F8", color="black", margin="0.08,0.05",
              label=<<B>Vector index</B><BR/><FONT POINT-SIZE="6.5">NumPy file: one row<BR/>per passage</FONT>>];
   { rank=same; catalogue; vectors; }

@@ -37,7 +37,7 @@ digraph architecture {
       rag       [fillcolor="#DDEBF9", color="black",
                  label=<<B>RAG engine</B><BR/><FONT POINT-SIZE="6.5">follow-ups · prompt · citations</FONT>>];
       retriever [fillcolor="#DDEBF9", color="black",
-                 label=<<B>Hybrid retriever</B><BR/><FONT POINT-SIZE="6.5">meaning + wording<BR/>→ fusion → rerank</FONT>>];
+                 label=<<B>Hybrid retriever</B><BR/><FONT POINT-SIZE="6.5">meaning + wording (BM25)<BR/>→ fusion → rerank</FONT>>];
     }
 
     subgraph cluster_models {
@@ -75,7 +75,7 @@ digraph architecture {
                      label=<<B>Conversations</B><BR/><FONT POINT-SIZE="6.5">SQLite · questions,<BR/>answers, sources</FONT>>];
       // two separate stores, joined only by the passage id
       catalogue [shape=cylinder, style="filled", fillcolor="#ECE6F8", color="black", margin="0.06,0.05",
-                 label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite · text, location,<BR/>FTS5 keyword index</FONT>>];
+                 label=<<B>Passage catalogue</B><BR/><FONT POINT-SIZE="6.5">SQLite · text, location,<BR/>FTS5 index, BM25 ranking</FONT>>];
       // a plain array file, not a database: drawn as a file, not a cylinder
       vectors   [shape=note, style="filled", fillcolor="#ECE6F8", color="black", margin="0.08,0.05",
                  label=<<B>Vector index</B><BR/><FONT POINT-SIZE="6.5">NumPy file · 22,944 × 1,024<BR/>float32, normalised</FONT>>];
@@ -105,7 +105,7 @@ digraph architecture {
                      class="mid left at10", taillabel=<prompt → answer,<BR/>if chosen <B>(13)</B>>];
   retriever -> embedder [dir=both, class="mid above at55", label=<convert query to vector <B>(10)</B>>];
   retriever -> reranker [dir=both, class="mid north at60", label=<rerank 24, keep best 6 <B>(12)</B>>];
-  retriever -> catalogue [dir=both, class="mid left at50", xlabel=<search by<BR/>wording <B>(11)</B>>];
+  retriever -> catalogue [dir=both, class="mid left at50", xlabel=<search by wording,<BR/>BM25 <B>(11)</B>>];
   retriever -> vectors [dir=both, class="mid right at65", xlabel=<search by meaning <B>(11)</B>>];
   rag:w -> conversations [class="mid east at58", xlabel=<save<BR/>exchange <B>(15)</B>>];
 

@@ -83,7 +83,7 @@ in a shared drive that several colleagues edit at once.
 The consequence is familiar: a single question can cost half an hour of opening
 files one by one, and under deadline pressure the tempting shortcut is to answer
 from memory---which is how an unsupported claim reaches an assessor. A
-general-purpose chatbot does not help. It has never seen these documents, yet it
+general-purpose artificial intelligence (AI) chatbot does not help. It has never seen these documents, yet it
 still produces a fluent answer, and a fluent answer that cites nothing is
 exactly the failure, known as hallucination~\cite{ji}, that an audited process
 cannot tolerate. What is needed is a system that answers \emph{only} from the
@@ -91,7 +91,8 @@ institution's own files, and shows its working.
 
 This paper reports such a system, built for and used in the accreditation of a
 Master's programme in informatics under the Indonesian independent accreditation
-agency for informatics and computing (LAM~INFOKOM). Its contribution is not a
+agency for informatics and computing (Lembaga Akreditasi Mandiri Informatika dan
+Komputer, LAM~INFOKOM). Its contribution is not a
 new algorithm but a complete, deployed design, and the reasoning behind it:
 \begin{itemize}
 \item an architecture (Section~\ref{sec:architecture}) that answers with
@@ -121,8 +122,10 @@ content; asking the model to cite the passage behind each statement makes the
 remaining errors visible to the reader~\cite{alce}.
 
 How well RAG works depends first on the search. Classical keyword ranking such
-as BM25~\cite{bm25} matches the words of the question and excels at names and
-identifiers. Dense retrieval represents question and passage as vectors from a
+as BM25 (Best Matching~25)~\cite{bm25} matches the words of the question and
+excels at names and identifiers: a passage scores higher the more often it
+contains the question's words, rare words count for more than common ones, and
+a long passage gains nothing merely from its length. Dense retrieval represents question and passage as vectors from a
 neural encoder and matches them by meaning~\cite{dpr}, catching paraphrases that
 share no words. Neither dominates: on a broad benchmark, BM25 remains a strong
 baseline that many dense models fail to beat outside the data they were trained
@@ -142,7 +145,8 @@ modest hardware.
 %% ===========================================================================
 \section{Requirements and User View}
 
-Five requirements, all taken from the accreditation setting, shaped the design:
+Five requirements (R1--R5), all taken from the accreditation setting, shaped the
+design:
 \begin{enumerate}
 \item[R1] \emph{Checkable}: every statement must lead, in one click, to the
   file and the page, sheet or slide that supports it.
@@ -180,7 +184,9 @@ office workstation. Colours mark roles---sources (yellow), the read-only guard
 (lavender), people's devices (mint) and outside services (grey). Arrows are
 numbered by step, as explained in Section~\ref{sec:architecture}; two-headed
 arrows are calls that return a result. The dashed arrow to a cloud model is the
-only path by which document text can leave the building.}
+only path by which document text can leave the building. CLI: command-line
+interface; SSE: Server-Sent Events; OCR: optical character recognition; int8:
+8-bit integers.}
 \label{fig:arch}
 \end{figure*}
 
@@ -196,27 +202,35 @@ read-only guard (steps 3--4). The pipeline splits every document into
 \emph{passages}---overlapping pieces of a few hundred words, the unit that is
 searched, shown on an evidence card and cited---has the embedding model turn
 each passage into a vector (step~5), and stores
-every passage twice (step~6): as text in a SQLite database with a full-text
-keyword index, and as a vector in a NumPy matrix. Section~\ref{sec:indexing}
-follows this path in detail.
+every passage twice (step~6): as text in a SQLite database---a complete
+database engine kept in a single file---with a full-text keyword index, and as
+a vector in a matrix of NumPy, Python's numerical array library.
+Section~\ref{sec:indexing} follows this path in detail.
 
 \emph{Answering} (left, steps 7--15) serves one question at a time. The browser
-sends the question (step~7) to a web server built with FastAPI, which handles
+sends the question (step~7) to a web server built with FastAPI, a Python web
+framework, which handles
 sign-in and starts an \emph{answer job}: the job hands the question to the RAG
 engine and relays the events it produces (step~8). The engine asks the hybrid
 retriever for passages (step~9). The retriever has the embedding model turn the
-question into a vector (step~10), searches the index by meaning and by wording
-for 40 passages each (step~11), and has the reranking model keep the best six
+question into a vector (step~10), searches the index by meaning (comparing
+vectors) and by wording (BM25, through SQLite's full-text index, FTS5:
+Full-Text Search~5) for 40
+passages each (step~11), and has the reranking model keep the best six
 of the 24 that survive fusion (step~12). The engine then sends a prompt built
 from those six passages to the answering model---local by default, or a cloud
 model if the user chose one---and receives the answer (step~13). The server
-streams the evidence cards and then the answer to the browser (step~14), and
+streams the evidence cards and then the answer to the browser as Server-Sent
+Events (SSE; step~14), and
 the engine saves the exchange in the conversation store (step~15).
 Section~\ref{sec:answering} follows this path in detail.
 
-The embedding model is BGE-M3~\cite{bge}, a multilingual model that handles
-Indonesian well and produces vectors of 1{,}024 numbers; it runs on the graphics
-card to index and on the processor to encode questions
+The embedding model is BGE-M3 (BAAI General Embedding, from the Beijing
+Academy of Artificial Intelligence; M3 for multi-lingual, multi-function,
+multi-granularity)~\cite{bge}, a multilingual model that
+handles Indonesian well and produces vectors of 1{,}024 numbers; it runs on the
+graphics card (graphics processing unit, GPU) to index and on the processor
+(central processing unit, CPU) to encode questions
 (Section~\ref{sec:results}). The reranking model is a cross-encoder from the
 same family, run on the processor in 8-bit integers; and the answering model
 is, by default, Qwen3 with 8 billion parameters~\cite{qwen}, served on the same
@@ -226,8 +240,9 @@ The code is Python, with dependencies running one way: the storage layer knows
 nothing about the web, and the web server never touches the database directly.
 The browser interface is plain JavaScript with no build step. An administrator
 account may also re-index; a guest account may only ask, and the server itself
-refuses indexing requests from it. Passwords are stored as salted PBKDF2 hashes
-and sessions as HMAC-signed cookies.
+refuses indexing requests from it. Passwords are stored as salted hashes made
+with PBKDF2 (Password-Based Key Derivation Function~2), and sessions as cookies
+signed with an HMAC (hash-based message authentication code).
 
 %% ===========================================================================
 \section{Indexing Pipeline}
@@ -258,7 +273,8 @@ all of it spent computing vectors.
 
 \subsubsection{Extraction that remembers where text was}
 Each format has its own extractor, and each produces \emph{labelled sections}
-rather than one block of text: a PDF yields one section per page, a workbook one
+rather than one block of text: a PDF (Portable Document Format) file yields one
+section per page, a workbook one
 per sheet, a slide deck one per slide, while Word documents, web pages and text
 files form a single section. Word tables are flattened row by row with column
 separators, and spreadsheet rows keep their cells tab-separated, so tabular
@@ -268,13 +284,14 @@ Table~\ref{tab:corpus} shows the result for the deployed archive.
 
 A PDF page yielding fewer than 60 characters is almost certainly a scan of a
 signed decree or certificate. Such pages are counted, and passed to optical
-character recognition (step~5; OCR, RapidOCR at 200\,dpi, at most 80 pages per
-document). The extracted sections and the recognised text then go on to be
+character recognition (OCR; step~5, RapidOCR at 200 dots per inch, at most 80
+pages per document). The extracted sections and the recognised text then go on to be
 split (step~6); passages recovered by OCR are marked, and the model is told to
 add a caution when it quotes a number from one.
 
-Evidence on public websites---the national research index SINTA, Google Scholar
-profiles, the higher-education database PDDikti and staff pages on the
+Evidence on public websites---the national research index SINTA (Science and
+Technology Index), Google Scholar profiles, the higher-education database
+PDDikti (Pangkalan Data Pendidikan Tinggi) and staff pages on the
 university site---is fetched by a separate snapshot run and saved as dated text
 in the local folder (step~1), which is then indexed like any other document. Each snapshot records its
 address and retrieval time, and repeats that marker throughout its text, so
@@ -301,13 +318,14 @@ Total                    & 1{,}497 & 1{,}308 & 22{,}944 & \\
 \end{tabular}
 
 \smallskip
-\parbox{\columnwidth}{\scriptsize $^{a}$Includes 138 dated snapshots of public
-web pages. Files ``with text'' yielded at least one passage; the other 189 held
-under 80 characters of readable text.}
+\parbox{\columnwidth}{\scriptsize $^{a}$CSV: comma-separated values. Includes
+138 dated snapshots of public web pages. Files ``with text'' yielded at least
+one passage; the other 189 held under 80 characters of readable text.}
 \end{table}
 
 \subsubsection{Splitting into passages}
-Documents are split into passages of at most 450 tokens, counted with the
+Documents are split into passages of at most 450 tokens---the word pieces a
+language model reads, about three-quarters of a word each---counted with the
 embedding model's own tokenizer, with about 80 tokens repeated between
 neighbours so that a fact straddling a boundary appears whole in one of them.
 The splitter packs whole paragraphs; only a paragraph too long by itself is cut
@@ -317,8 +335,11 @@ spreadsheet rows and OCR output---is cut between words. Fragments shorter than
 
 \subsubsection{Embedding and storage}
 Each of the 22{,}944 passages (step~7) is encoded by BGE-M3 on the graphics
-card and stored in both stores (step~8): the SQLite catalogue holds its text, document and location, and indexes
-it for keyword search with SQLite's FTS5 extension~\cite{fts5}; the vector index
+card and stored in both stores (step~8): the SQLite catalogue holds its text,
+document and location, and indexes it for keyword search with SQLite's FTS5
+extension~\cite{fts5}, which keeps for every word the list of passages that
+contain it, so a search reads those lists instead of every passage, and ranks
+the matches with BM25; the vector index
 holds its normalised vector in a matrix with one row per passage.
 
 \subsubsection{Coping with a live drive}
@@ -356,11 +377,13 @@ resulting query goes to two searches at once (step~2).
 \subsubsection{Two kinds of search}
 \emph{Search by meaning} encodes the question with BGE-M3 and compares it with
 every stored vector. This understands that ``lecturer teaching load'' and the
-Indonesian abbreviation \emph{EWMP} mean the same thing though they share no
-words, but it is unreliable with exact identifiers. \emph{Search by wording}
-removes common Indonesian and English function words, keeps words of three
-letters or more, and ranks passages with BM25 through FTS5. It finds a decree
-number such as \texttt{SK-045/XYZ/VI/2025} precisely, and is blind to
+Indonesian abbreviation \emph{EWMP} (ekuivalen waktu mengajar penuh, full-time
+teaching-load equivalent) mean the same thing though they share no words, but
+it is unreliable with exact identifiers. \emph{Search by wording} removes
+common Indonesian and English function words, keeps words of three letters or
+more, and ranks passages with BM25 through FTS5. It finds the number of a
+decree (surat keputusan, SK) such as \texttt{SK-045/XYZ/VI/2025} precisely, and
+is blind to
 paraphrase. Accreditation documents are full of both---narrative argument on one
 page, decree and registration numbers on the next---so dropping either method
 would quietly make a whole class of questions unanswerable. Each search returns
@@ -370,8 +393,9 @@ net; the re-scoring model reads every passage it is given in full, so it gets
 24; and the answering model gets six.
 
 \subsubsection{Fusing the rankings}
-The two candidate lists cannot simply be added, because cosine similarity and
-BM25 scores live on different scales. They are merged by \emph{position}
+The two candidate lists cannot simply be added, because cosine similarity (how
+closely two vectors point the same way) and BM25 scores live on different
+scales. They are merged by \emph{position}
 instead, with reciprocal rank fusion~\cite{rrf}:
 \begin{equation}
 \mathrm{score}(p) = \sum_{r \in \{\text{meaning},\,\text{wording}\}}
@@ -387,8 +411,11 @@ diagnosing a poor answer.
 The 24 best fused passages (step~4) are read once more, in full and together
 with the question, by BGE-reranker-v2-m3, a cross-encoder~\cite{nogueira}, and
 the six it scores highest are kept and numbered [1]--[6]. It runs on the
-processor, compiled with OpenVINO and quantised to 8-bit integers, which makes
-it three times faster than in PyTorch while keeping 95\,\% of its choices
+processor, compiled with OpenVINO (Open Visual Inference and Neural network
+Optimization), Intel's toolkit for running neural networks on its processors,
+and quantised to 8-bit integers---each weight stored as a whole number rather
+than a 32-bit decimal---which makes it three times faster than in the PyTorch
+library while keeping 95\,\% of its choices
 (Section~\ref{sec:results}). These six go both to
 the browser, as evidence cards (step~5), and into the prompt (step~6). If the
 reranker is
@@ -408,8 +435,9 @@ fact two answers later. Last come the six numbered passages, each with its
 document name and location, capped at 14{,}000 characters in total so they
 always fit the model's 8{,}192-token context. The prompt goes to the answering
 model (step~7), whose text is streamed to the browser as it is written
-(step~8). The local model runs at a low temperature (0.2), with its separate
-reasoning mode switched off.
+(step~8). The local model runs at a low temperature (0.2), which keeps its
+choice of words close to the most likely one, with its separate reasoning mode
+switched off.
 
 Keeping to six passages follows the evidence that models use long inputs unevenly~\cite{liu}, and it
 leaves room on a small graphics card. If nothing is found, the model is not
@@ -420,10 +448,11 @@ called at all, and the user is told so with suggestions for rephrasing.
 The answering model is interchangeable per question, and the choice is a privacy
 decision more than a technical one (Table~\ref{tab:models}). The default, Qwen3
 8B, runs locally, so no document text leaves the building (R3). For harder
-questions the user may select Claude, GPT or Gemini, which synthesise better
-but send the six retrieved passages to their provider. These are driven through
-each vendor's command-line tool, already signed in on the workstation, so no
-API keys are stored; each tool runs non-interactively with its
+questions the user may select Claude, GPT (Generative Pre-trained Transformer)
+or Gemini, which synthesise better but send the six retrieved passages to their
+provider. These are driven through each vendor's command-line tool, already
+signed in on the workstation, so no API (application programming interface)
+keys are stored; each tool runs non-interactively with its
 file and shell tools disabled, so the model answers purely from the prompt and
 cannot browse the archive itself. The interface states the trade-off on the
 model selector, so the choice is made knowingly.
@@ -454,9 +483,10 @@ the premises: the question and the six retrieved passages.}
 \section{Delivering Answers Reliably}
 \label{sec:delivery}
 
-The answer reaches the browser as a stream of Server-Sent Events, evidence
-cards first, so the reader can start checking sources while the model---the
-slowest part of a request---is still writing.
+The answer reaches the browser as an SSE stream---a standard way for a web
+server to keep sending messages over one open connection---evidence cards
+first, so the reader can start checking sources
+while the model---the slowest part of a request---is still writing.
 
 \begin{figure}[t]
 \centering
@@ -470,7 +500,8 @@ Phones made a second design necessary (Fig.~\ref{fig:stream}). A local model may
 to load after a restart, and a cloud model at its highest reasoning setting can
 think for a minute before its first word; locking the screen or switching apps
 in that silence drops the connection. When answers were generated inside the
-HTTP response, a dropped connection killed the answer, which was then never
+HTTP (Hypertext Transfer Protocol) response, a dropped connection killed the
+answer, which was then never
 saved. Each question now becomes an \emph{answer job} running in its own thread
 on the server, independent of any connection, which numbers and keeps every
 event it produces; the HTTP response is merely a reader of that log. The step
@@ -501,7 +532,9 @@ working memory for an 8{,}192-token context, and the desktop itself takes
 0.6--1.1\,GB. Nothing else fits beside them, so only the answering model stays
 on the card while the system answers. The re-scoring model runs on the
 processor, and so does the embedding model when it encodes a question; it
-uses the card only while indexing and releases it afterwards. We learnt this
+uses the card only while indexing, in a separate process that ends with the
+run, because a model that has once run on the card leaves about 1.4\,GB there
+until its process exits. We learnt this
 the hard way: Section~\ref{sec:results} shows what happened when the embedding
 model stayed on the card. Qwen3 8B is the largest model that fits
 \emph{entirely} on the card with room for a long RAG context; a 14-billion
@@ -511,7 +544,8 @@ processor, and in our trials answered at roughly a fifth of the speed.
 \emph{No vector database.} The index is a SQLite file and a NumPy matrix rather
 than a dedicated vector database. All 22{,}944 vectors occupy 94\,MB of memory,
 and comparing a question against every one of them takes 1.8\,ms on this
-machine---exact, with no recall lost to approximation---while a keyword search
+machine---exact, with no recall (the share of the truly nearest passages a
+search returns) lost to approximation---while a keyword search
 takes about 24\,ms (Section~\ref{sec:results}). An approximate index would add a dependency and lose
 recall to save time no user could notice.
 
@@ -523,7 +557,7 @@ path inside the archive; Excel files are opened in a read-only streaming mode;
 and the server refuses to start if its own data folder lies inside the archive.
 Sixteen tests cover these guarantees, one of which runs a full indexing pass and
 verifies that every source file is byte-for-byte unchanged. The whole suite of
-487 unit tests runs in about 30 seconds without network access or model
+513 unit tests runs in about 25 seconds without network access or model
 downloads, with the models replaced by stand-ins.
 
 %% ===========================================================================
@@ -548,7 +582,7 @@ highest reasoning setting typically take 30 to 60 seconds.
 
 The system's own log showed that some answers took two minutes, far beyond
 what the hardware should need. We therefore measured it, stage by stage, to
-answer three research questions:
+answer three research questions (RQ1--RQ3):
 \begin{itemize}
 \item[RQ1] Where does the time go when the system answers a question?
 \item[RQ2] How much faster can the slowest stages run on the same hardware,
@@ -559,9 +593,11 @@ answer three research questions:
 
 \subsubsection{Setup}
 All measurements ran on the deployment workstation
-(Section~\ref{sec:workstation}) under Windows~11, with PyTorch~2.11 (CUDA~12.8),
+(Section~\ref{sec:workstation}) under Windows~11, with PyTorch~2.11 on CUDA~12.8
+(Compute Unified Device Architecture, NVIDIA's interface to the graphics card),
 sentence-transformers~6.0 and Ollama~0.40.16, against the deployed index of
-22{,}944 passages. The answering models are 4-bit (Q4\_K\_M) builds, run with
+22{,}944 passages. The answering models are 4-bit builds in the Q4\_K\_M
+format, which stores most weights in about 4.5 bits, run with
 the system's own settings: 8{,}192-token context, temperature~0.2, at most
 1{,}536 output tokens and reasoning mode off.
 
@@ -617,11 +653,14 @@ at what precision it runs was varied. For re-scoring, the same model was
 compiled with OpenVINO and quantised to 8-bit integers by post-training
 quantisation~\cite{nncf}, calibrated on 300 question--passage pairs drawn from
 the corpus. For the stores, exact NumPy search was compared with exact and
-approximate FAISS~\cite{faiss} and usearch indexes, and FTS5 with the bm25s
-and Tantivy BM25 engines~\cite{bm25s}, all on the twenty questions' real
-vectors and keywords. For answering, Ollama's 8-bit key--value cache was
-tried (flash attention is already on by default~\cite{ollama}), as was
+approximate FAISS (Facebook AI Similarity Search)~\cite{faiss} and usearch
+indexes, and FTS5 with the bm25s and Tantivy BM25 engines~\cite{bm25s}, all on
+the twenty questions' real vectors and keywords. For answering, an 8-bit
+key--value cache---the model's working memory for the text it has
+read---was tried (flash attention, a faster way of computing the model's
+attention, is already on by default~\cite{ollama}), as was
 Qwen3.5 4B~\cite{qwen35}, which matches Qwen3 8B on the Indonesian SEA-HELM
+(Southeast Asian Holistic Evaluation of Language Models)
 benchmark (62.7 against 62.5) and exceeds it on extractive question answering,
 the skill RAG relies on (80.5 against 75.0)~\cite{seahelm}.
 
@@ -667,7 +706,8 @@ was found (Table~\ref{tab:ablation}). The cause was memory. The desktop took
 2.3\,GB, and Qwen3 8B 5.8\,GB: 8.7\,GB on an 8\,GB card. Windows does not refuse
 such a load. Its display driver lends the card system memory, reported as
 \emph{shared GPU memory}---1.7\,GB here---which the card reaches over the
-PCIe bus at a fraction of the speed of its own. Ollama, which sees only what it
+PCIe (Peripheral Component Interconnect Express) bus at a fraction of the
+speed of its own. Ollama, which sees only what it
 was granted, reported the model as entirely on the graphics card. Nothing
 failed; everything slowed, which explains the two-minute answers in the log.
 Encoding a question took 11\,ms when measured alone but 174\,ms in the full
@@ -760,8 +800,10 @@ Tantivy                            & 0.10 & 95.4\,\% \\
 \end{tabular}
 
 \smallskip
-\parbox{\columnwidth}{\scriptsize $^{a}$Its Windows build lacks SIMD
-instructions. Ten timed passes after three warm-ups.}
+\parbox{\columnwidth}{\scriptsize $^{a}$Its Windows build lacks SIMD (single
+instruction, multiple data) instructions. HNSW: hierarchical navigable small
+world, a graph that finds near neighbours approximately; $ef$ is how many
+candidates it keeps while searching. Ten timed passes after three warm-ups.}
 \end{table}
 
 \subsubsection{Search and storage}
@@ -794,9 +836,9 @@ Complete answer       & 41.9 & 97.5 & 6.6 & 13.4 \\
 \end{tabular}
 
 \smallskip
-\parbox{\columnwidth}{\scriptsize 5 questions $\times$ 10 timed passes each.
-Improved: question encoder on the processor, 8-bit OpenVINO reranker; same
-models, same Ollama settings.}
+\parbox{\columnwidth}{\scriptsize 5 questions $\times$ 10 timed passes each;
+p95: 95th percentile. Improved: question encoder on the processor, 8-bit
+OpenVINO reranker; same models, same Ollama settings.}
 \end{table}
 
 \begin{figure}[t]
@@ -847,7 +889,8 @@ Wrong course codes (Q12)$^{a}$        & 0/30 & 17/20 \\
 \smallskip
 \parbox{\columnwidth}{\scriptsize Five questions $\times$ ten answers; Qwen3.5
 4B with the 8-bit cache, which changes its memory by 0.1\,GB.
-$^{a}$Over all runs of each model: three of Qwen3 8B, two of Qwen3.5 4B.}
+$^{a}$Q12: question~12, which courses cover machine learning; over all runs of
+each model: three of Qwen3 8B, two of Qwen3.5 4B.}
 \end{table}
 
 \begin{figure}[t]
