@@ -1,0 +1,37 @@
+// Fig. — from 40 + 40 candidates to six passages: fusion, shortlist, reranking.
+// Rendered by render_diagrams.py. Same pastel palette as the other figures;
+// sized for the full text width (516 pt), left to right.
+digraph reranking {
+  graph [rankdir=LR, newrank=true, fontname="Helvetica", nodesep=0.10, ranksep=0.22,
+         pad="0.02,0.03", splines=line, bgcolor="white"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=7.5,
+         fontcolor="#1F2933", penwidth=0.8, margin="0.08,0.05", height=0.24];
+  edge  [color="#5B6773", penwidth=0.7, arrowsize=0.5, fontname="Helvetica",
+         fontsize=6.5, fontcolor="#44515E"];
+
+  meaning  [fillcolor="#DDEBF9", color="black",
+            label=<<B>By meaning</B><BR/><FONT POINT-SIZE="6.5">BGE-M3 vectors,<BR/>40 nearest</FONT>>];
+  wording  [fillcolor="#DDEBF9", color="black",
+            label=<<B>By wording</B><BR/><FONT POINT-SIZE="6.5">BM25 in FTS5,<BR/>40 best</FONT>>];
+  fuse     [fillcolor="#DDEBF9", color="black",
+            label=<<B>Rank fusion</B><BR/><FONT POINT-SIZE="6.5">merged by rank:<BR/>≈ 71 different passages</FONT>>];
+  shortlist [fillcolor="#DDEBF9", color="black",
+            label=<<B>Shortlist</B><BR/><FONT POINT-SIZE="6.5">the 24 best<BR/>by fusion rank</FONT>>];
+  distinct [fillcolor="#ECE6F8", color="black",
+            label=<<B>Distinct texts</B><BR/><FONT POINT-SIZE="6.5">copies set aside:<BR/>≈ 20 left</FONT>>];
+  score    [fillcolor="#FFE4D4", color="black",
+            label=<<B>Cross-encoder</B><BR/><FONT POINT-SIZE="6.5">reads question + passage<BR/>together → one score;<BR/>shortest first, 8 a batch</FONT>>];
+  best     [fillcolor="#D9F2EF", color="black",
+            label=<<B>Best 6</B><BR/><FONT POINT-SIZE="6.5">[1]–[6]: cards<BR/>and the prompt</FONT>>];
+
+  { rank=same; meaning; wording; }
+
+  // Every edge says what flows along it, ending with its step. Letters, not
+  // numbers, so these steps are not confused with Fig. 3's.
+  meaning -> fuse [label=< 40 <B>(a)</B>>];
+  wording -> fuse [label=< 40 <B>(a)</B>>];
+  fuse -> shortlist [label=< ranked <B>(b)</B>>];
+  shortlist -> distinct [label=< 24 <B>(c)</B>>];
+  distinct -> score [label=< ≈ 20 pairs <B>(d)</B>>];
+  score -> best [label=< 24 scored <B>(e)</B>>];
+}

@@ -1,0 +1,66 @@
+{
+ "kind": "stages",
+ "label": "improved",
+ "created": "2026-11-26T13:14:34",
+ "settings": {
+  "query_embedding_device": "cpu",
+  "query_embedding_backend": "torch",
+  "query_embedding_threads": 8,
+  "reranking_backend": "openvino",
+  "rerank_candidates": 24,
+  "indexed_passages": 24792,
+  "questions": 20,
+  "warmup": 3,
+  "repeats": 10
+ },
+ "stage_summary_ms": {
+  "embed_query": {
+   "median": 41.51285,
+   "p95": 47.96658,
+   "mean": 42.2043515,
+   "n": 200
+  },
+  "search_by_meaning": {
+   "median": 1.4638499999999999,
+   "p95": 1.57634,
+   "mean": 1.4767365,
+   "n": 200
+  },
+  "fetch_dense_passages": {
+   "median": 0.5105999999999999,
+   "p95": 0.6068899999999999,
+   "mean": 0.51484,
+   "n": 200
+  },
+  "search_by_wording": {
+   "median": 18.557949999999998,
+   "p95": 27.599909999999905,
+   "mean": 17.5312575,
+   "n": 200
+  },
+  "rerank": {
+   "median": 2283.516,
+   "p95": 2704.7210699999996,
+   "mean": 2227.325652,
+   "n": 200
+  },
+  "fusion": {
+   "median": 0.02595,
+   "p95": 0.030604999999999997,
+   "mean": 0.0262925,
+   "n": 200
+  },
+  "build_prompt": {
+   "median": 0.02095,
+   "p95": 0.025614999999999995,
+   "mean": 0.021204,
+   "n": 200
+  },
+  "retrieval_total": {
+   "median": 2359.30755,
+   "p95": 2765.369175,
+   "mean": 2289.151615,
+   "n": 200
+  }
+ }
+}

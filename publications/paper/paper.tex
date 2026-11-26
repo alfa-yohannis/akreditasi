@@ -177,7 +177,7 @@ one criterion's folder, and every exchange is kept in a saved conversation.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{architecture}
+\includegraphics[width=0.94\textwidth]{architecture}
 \caption{System architecture. Everything inside the dashed boundary runs on one
 office workstation. Colours mark roles---sources (yellow), the read-only guard
 (rose), indexing (green), models (peach), serving (blue), stored data
@@ -396,10 +396,12 @@ net; the re-scoring model reads every passage it is given in full, so it gets
 The two candidate lists cannot simply be added, because cosine similarity (how
 closely two vectors point the same way) and BM25 scores live on different
 scales. They are merged by \emph{position}
-instead, with reciprocal rank fusion~\cite{rrf}:
+instead, with reciprocal rank fusion~\cite{rrf}, which gives each passage $p$
+the score of Eq.~(\ref{eq:rrf}):
 \begin{equation}
 \mathrm{score}(p) = \sum_{r \in \{\text{meaning},\,\text{wording}\}}
   \frac{1}{k + \mathrm{rank}_r(p)}, \qquad k = 60,
+\label{eq:rrf}
 \end{equation}
 where a passage absent from a list contributes nothing for it. A passage ranked
 highly by both methods thus rises above one that only a single method
@@ -407,10 +409,28 @@ favours, and the rule needs no retuning when the collection changes. The
 evidence card shows which method found each passage, which helps when
 diagnosing a poor answer.
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{reranking}
+\caption{From 40\,+\,40 candidates to six passages, with steps lettered as
+explained in Section~\ref{sec:answering}; ``$\approx$'' marks medians over the
+twenty test questions of Section~\ref{sec:method}.}
+\label{fig:rerank}
+\end{figure*}
+
 \subsubsection{Re-scoring}
 The 24 best fused passages (step~4) are read once more, in full and together
 with the question, by BGE-reranker-v2-m3, a cross-encoder~\cite{nogueira}, and
-the six it scores highest are kept and numbered [1]--[6]. It runs on the
+the six it scores highest are kept and numbered [1]--[6].
+Fig.~\ref{fig:rerank} follows the numbers, its steps lettered. The two
+searches return 40 passages each (a); because many are found by only one
+search, fusion leaves about 71 different passages, in rank order (b), of which
+the 24 best form the shortlist (c). Copies of one document often bring the
+same passage text more than once---only about 20 of the 24 texts are
+distinct---so each distinct text is scored once, the shortest first so that
+each batch of eight wastes little on padding (d). The cross-encoder reads the
+question and each passage together and returns one relevance score, which
+every copy of that text shares, and the six best are kept (e). It runs on the
 processor, compiled with OpenVINO (Open Visual Inference and Neural network
 Optimization), Intel's toolkit for running neural networks on its processors,
 and quantised to 8-bit integers---each weight stored as a whole number rather
@@ -501,24 +521,20 @@ to load after a restart, and a cloud model at its highest reasoning setting can
 think for a minute before its first word; locking the screen or switching apps
 in that silence drops the connection. When answers were generated inside the
 HTTP (Hypertext Transfer Protocol) response, a dropped connection killed the
-answer, which was then never
-saved. Each question now becomes an \emph{answer job} running in its own thread
-on the server, independent of any connection, which numbers and keeps every
-event it produces; the HTTP response is merely a reader of that log. The step
-numbers below refer to Fig.~\ref{fig:stream}. The browser posts the question
-(step~1); the server starts the job (step~2) and at once returns its
-identifier (step~3). The job sends the evidence cards as event \#1 (step~4),
-prompts the model (step~5) and relays its text as it arrives (steps 6--7). If
-the connection drops, the job carries on, logging the text that keeps arriving
-(step~8). A browser that has lost its connection, heard nothing for 35 seconds,
-or returned to the page after more than 15 seconds hidden asks for the events
-after the last one it received, $k$ (step~9); it is sent those it missed and
-then follows the live stream (step~10), until the job reports that the answer
-is done and saved (step~11)---with its sources, even if nobody was watching.
-The server sends a keep-alive comment every 10 seconds of silence so that idle
-connections are not cut, finished jobs are kept for 30 minutes, and a Stop
-button cancels the job explicitly, since closing the connection no longer
-does.
+answer, which was then never saved. Each question now becomes an \emph{answer
+job} running in its own server thread, independent of any connection, which
+numbers and keeps every event it produces; the HTTP response merely reads that
+log. In Fig.~\ref{fig:stream}, the browser posts the question (step~1); the
+server starts the job (step~2) and at once returns its identifier (step~3).
+The job sends the evidence cards as event \#1 (step~4), prompts the model
+(step~5) and relays its text (steps 6--7). If the connection drops, the job
+carries on logging (step~8). A browser that lost its connection, heard nothing
+for 35 seconds, or returned after more than 15 seconds hidden asks for the
+events after the last one it received, $k$ (step~9), gets those it missed and
+follows the live stream (step~10) until the answer is done and saved
+(step~11)---with its sources, even if nobody was watching. A keep-alive comment
+every 10 seconds of silence stops idle connections being cut, finished jobs
+are kept for 30 minutes, and a Stop button cancels a job explicitly.
 
 %% ===========================================================================
 \section{Fitting One Workstation}
@@ -571,9 +587,9 @@ extraction 1{,}306 pages were recognised as scans and 305 of them were
 recovered by OCR. One workstation serves the whole team over the office
 network, desktops and phones alike. Before the changes of
 Section~\ref{sec:results}, local answers in the usage log took 24 to 148
-seconds (median 55); the evidence cards now appear after about 3 seconds, the
-first words of the answer after about 5, and a complete answer after about 7
-(medians). Cloud models at their
+seconds (median 55); the evidence cards now appear about 2.5 seconds after a
+question is submitted, the first words of the answer after about 5, and a
+complete answer after about 7 (medians). Cloud models at their
 highest reasoning setting typically take 30 to 60 seconds.
 
 %% ===========================================================================
@@ -671,30 +687,38 @@ the skill RAG relies on (80.5 against 75.0)~\cite{seahelm}.
 \subsection{RQ1: Where does the time go?}
 
 \begin{table}[t]
-\caption{Time per question as deployed, by stage}
+\caption{Time per question by stage, as deployed and after the changes}
 \label{tab:stages}
 \centering
 \footnotesize
-\begin{tabular}{@{}lrr@{}}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-Stage & Median & 95th pct. \\
+ & \multicolumn{2}{c}{As deployed} & \multicolumn{2}{c}{After} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Stage & median & p95 & median & p95 \\
 \midrule
-Encode the question (BGE-M3, GPU)        & 174\,ms  & 230\,ms \\
-Search by meaning (exact, 22{,}944)      & 1.8\,ms  & 1.9\,ms \\
-Search by wording (FTS5, BM25)           & 24\,ms   & 39\,ms \\
-Fuse rankings, build prompt              & $<$0.1\,ms & $<$0.1\,ms \\
-Re-score 24 passages (PyTorch, CPU)      & 9.4\,s   & 11.0\,s \\
-Answering model: first word              & 18.5\,s  & 21.1\,s \\
-Answering model: complete answer         & 35.0\,s  & 83.6\,s \\
+Encode the question$^{a}$        & 174\,ms  & 230\,ms  & 42\,ms   & 48\,ms \\
+Search by meaning$^{b}$          & 1.8\,ms  & 1.9\,ms  & 1.5\,ms  & 1.6\,ms \\
+Search by wording (BM25)         & 24\,ms   & 39\,ms   & 19\,ms   & 28\,ms \\
+Fusion, prompt                   & $<$0.1\,ms & $<$0.1\,ms & $<$0.1\,ms & $<$0.1\,ms \\
+Re-score 24 passages$^{c}$       & 9.4\,s   & 11.0\,s  & 2.3\,s   & 2.7\,s \\
+Answer: first word               & 18.5\,s  & 21.1\,s  & 1.9\,s   & 2.1\,s \\
+Answer: complete                 & 35.0\,s  & 83.6\,s  & 3.8\,s   & 10.1\,s \\
 \bottomrule
 \end{tabular}
 
 \smallskip
 \parbox{\columnwidth}{\scriptsize Retrieval: 20 questions $\times$ 10 timed
-passes; answering: 5 questions $\times$ 10, each prompt new.}
+passes; answering: 5 questions $\times$ 10, each prompt new; p95: 95th
+percentile. $^{a}$BGE-M3 on the GPU as deployed, on the CPU (8 threads)
+after. $^{b}$Exact, over 22{,}944 passages as deployed and 24{,}792 after
+re-indexing. $^{c}$PyTorch as deployed; OpenVINO int8, each distinct text once,
+shortest first, after.}
 \end{table}
 
-Table~\ref{tab:stages} answers RQ1. Two stages take 99.5\,\% of the
+The ``as deployed'' columns of Table~\ref{tab:stages} answer RQ1. Two stages
+take 99.5\,\% of the
 44.6\,seconds a question costs: re-scoring, 9.4\,s, and the answering model,
 35.0\,s. Encoding the question, both searches, fusion and the prompt together
 take less than a fifth of a second.
@@ -775,6 +799,18 @@ cases---on average 5.7 of the six, from identical candidates. That met the
 90\,\% bar, and it is now the default; if its compiled model is missing, the
 system falls back to PyTorch.
 
+Three later changes leave every score as it was. A median of only 20.5 of the
+24 candidates are distinct texts, so a fifth of the reranker's work was
+repeated; each text is now scored once. Texts go to the model shortest first,
+so batches pad less. And the question encoder, given all 20 cores, had fought
+the reranker for them; limited to 8 threads, with its idle threads no longer
+spinning, it encodes a question in 42\,ms instead of 89\,ms. Measured over
+real HTTP, the cards then arrived 2.5\,s after the question was submitted,
+instead of 3.0\,s, with the same six passages (Table~\ref{tab:stages}, last
+two columns). Reranking fewer candidates would be faster still, but against
+the reranker reading every fused candidate, 18 kept 68\,\% of its six and 24
+kept 78\,\%, while 32 added only 5 points for a further second, so 24 stays.
+
 \begin{table}[t]
 \caption{Search alternatives on their own, with the twenty questions' vectors}
 \label{tab:stores}
@@ -807,16 +843,11 @@ candidates it keeps while searching. Ten timed passes after three warm-ups.}
 \end{table}
 
 \subsubsection{Search and storage}
-Both searches together took 26\,ms per question inside the pipeline, under
-half a per cent even of the improved time. Measured on their own
-(Table~\ref{tab:stores}), the exact NumPy search took 1.3\,ms; approximate
-HNSW graphs answered in a fraction of a millisecond but missed 0.5 to
-4.5\,\% of the exact 40, and FAISS's own exact index was slower.
-FTS5 took 15\,ms because the deployed query joins every match to the passage
-table before keeping the best 40; ranking first gives the same 40 in 3.3\,ms.
-Dedicated BM25 engines are faster still but no longer agree exactly. None of
-these differences could be noticed against a 6.6-second answer, so both stores
-were kept, with the rank-first query as a free improvement for later.
+Both searches together took 26\,ms, under half a per cent even of the
+improved time, so no faster store could be noticed (Table~\ref{tab:stores}):
+approximate HNSW graphs answered in under a millisecond but missed up to
+4.5\,\% of the exact 40, and FTS5 gives the same 40 in 3.3 instead of 15\,ms
+when it ranks before joining the passage table. Both stores were kept.
 
 \begin{table}[t]
 \caption{End to end through the system's own code (s)}
@@ -859,7 +890,7 @@ evidence cards now appear after 2.8\,s instead of 7.6\,s, the first word after
 4.9\,s instead of 26.0\,s, and the complete answer after 6.6\,s instead of
 41.9\,s: 6.3 times faster at the median and 7.3 times at the 95th percentile.
 The models, Ollama's settings and the passages the model reads are unchanged.
-Re-scoring, at about 3\,s, is now the largest single stage.
+Re-scoring, at about 3\,s, was then the largest single stage.
 
 \subsection{RQ3: Can a smaller model replace the default?}
 
@@ -928,18 +959,15 @@ second saved, so Qwen3 8B remains the default.
 
 \subsection{Threats to validity}
 Overlap@6 measures agreement with the deployed system, not retrieval quality:
-there are no labelled relevant passages, so a change that alters 5\,\% of the
-passages may help or harm. The grounding and figure checks are mechanical, and
-the reading of answers was done by one reader, not blind to the model. Twenty
-questions---five for the answering model---on one machine and one corpus
-cannot show how the results vary across question types or hardware; the
-memory finding, in particular, depends on what else is on the screen. The
-unique line added to each prompt is a dozen tokens, and conversations in real
-use add up to 2{,}500 characters of history, which was not measured. The
-system stayed in service during the end-to-end runs: seven of the 50 timed
-answers as deployed overlapped a software installation on the same machine,
-and one colleague's question overlapped at most one improved answer; leaving
-those seven out moves no median by more than 0.2\,s.
+without labelled relevant passages, a change that alters 5\,\% of them may help
+or harm. The grounding and figure checks are mechanical, and one reader, not
+blind to the model, read the answers. Twenty questions---five for the
+answering model---on one machine and corpus cannot show how results vary
+across question types or hardware, and the memory finding depends on what else
+is on the screen. Conversation history (up to 2{,}500 characters) was not
+measured. Seven as-deployed answers overlapped a software installation and one
+improved answer a colleague's question; leaving them out moves no median by
+more than 0.2\,s.
 
 %% ===========================================================================
 \section{Limitations and Lessons}
@@ -952,9 +980,8 @@ step is to draw a few hundred questions from the accreditation instrument,
 mark the passages that answer each, and measure every retrieval stage
 separately alongside citation quality~\cite{alce}. The checkability of each
 answer (R1) mitigates, but does not replace, such a study. Re-scoring, at
-3.1\,s, is now the slowest stage, and the six passages often include the same
-text twice, from copies of one document; removing such duplicates would give
-the model more evidence for the same prompt length.
+2.3\,s, is still the slowest step before the cards, and the six passages can
+include one text twice, from copies of a document.
 
 \emph{Other limits.} Legacy \texttt{.doc} and \texttt{.xls} files are not read;
 OCR misreads digits on poor scans; web snapshots go stale until refreshed; the
@@ -979,10 +1006,9 @@ An accreditation team can have a question-answering assistant whose answers are
 page, sheet or slide, leaving them untouched, and running on hardware the
 department already owns. None of its components is new; the value lies in how
 they are fitted to an audited, confidential and constantly changing archive.
-Measuring it stage by stage paid off: the largest speed-up came not from a
-faster model but from moving a 2\,GB model off the graphics card. The
-approach transfers to any organisation that must justify claims from a large,
-messy, authoritative collection of documents.
+The largest speed-up came not from a faster model but from moving a 2\,GB
+model off the graphics card. The approach transfers to any organisation that
+must justify claims from a large, messy, authoritative collection.
 
 %% ===========================================================================
 \begin{thebibliography}{19}
