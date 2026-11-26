@@ -44,17 +44,16 @@ alfa.ryano@pradita.ac.id}}
 Accreditation requires evidence for hundreds of claims, scattered across
 thousands of files. We present a retrieval-augmented generation system that
 answers Indonesian questions from an institution's own documents, citing the
-exact page, sheet or slide behind every statement. It combines search by
-meaning and by wording, fuses and re-scores the results, and runs on one
-office workstation, so confidential documents stay on site; it never modifies
-the archive, re-indexes incrementally, and keeps answers through dropped
-connections. A stage-by-stage evaluation located the bottleneck: graphics
-memory silently overflowing into system memory. Removing it and running the
-re-scoring model in 8-bit integers made complete answers 6.3 times faster and
-first words 5.3 times faster on the same hardware, while keeping 95\,\% of the
-passages the model reads. A model half the size started 2.1 times sooner but
-misattributed facts in 85\,\% of answers to one question, so the larger model
-remained.
+page, sheet or slide behind every statement. It combines search by meaning and
+by wording, fuses and re-scores the results, and runs on one office
+workstation with an 8\,GB graphics card, so confidential documents stay on
+site. A stage-by-stage evaluation located the bottleneck: graphics memory
+silently overflowing into system memory. Removing it and running the
+re-scoring model in 8-bit integers made complete answers 6.3 times faster
+(median 41.9 to 6.6\,s) and first words 5.3 times faster (26.0 to 4.9\,s) on
+the same hardware, keeping 95\,\% of the passages the model reads. A model half
+the size started 2.1 times sooner (0.9 vs 1.9\,s) but misattributed facts in
+85\,\% of answers to one question, so it was rejected.
 \end{abstract}
 
 \begin{IEEEkeywords}
