@@ -41,28 +41,20 @@ alfa.ryano@pradita.ac.id}}
 \maketitle
 
 \begin{abstract}
-Preparing a university accreditation submission means answering hundreds of
-detailed questions, and the evidence for each is buried somewhere in a shared
-folder of thousands of files. This paper describes a working system that lets
-staff ask a question in everyday Indonesian and receive an answer in seconds, in
-which every statement carries a numbered citation pointing to the exact file and
-page, sheet or slide it came from. It is built on retrieval-augmented
-generation: the institution's own documents are searched first---by meaning and
-by exact wording, with the two rankings fused and re-scored---and the language
-model may write only from what was found. We describe the architecture, the
-indexing and answering pipelines, and the engineering that makes the answers
-checkable and the system dependable: source files are never modified, an index
-of 1{,}497 files rebuilds incrementally while colleagues keep editing the drive,
-answers survive dropped connections, and the whole system runs on one office
-workstation with an 8\,GB graphics card, so confidential material need not
-leave the building. A stage-by-stage performance evaluation on twenty questions
-found the bottleneck in an unexpected place: a model left on the graphics card
-had pushed it past its memory, and Windows silently lent it system memory,
-making the answering model ten times slower. Moving that model to the
-processor and compiling the re-scoring model to 8-bit integers cut the median
-time to a complete answer from 41.9 to 6.6 seconds on the same hardware,
-without loss of accuracy in our checks; a smaller answering model,
-though faster to start, misattributed facts.
+Accreditation requires evidence for hundreds of claims, scattered across
+thousands of files. We present a retrieval-augmented generation system that
+answers Indonesian questions from an institution's own documents, citing the
+exact page, sheet or slide behind every statement. It combines search by
+meaning and by wording, fuses and re-scores the results, and runs on one
+office workstation, so confidential documents stay on site; it never modifies
+the archive, re-indexes incrementally, and keeps answers through dropped
+connections. A stage-by-stage evaluation located the bottleneck: graphics
+memory silently overflowing into system memory. Removing it and running the
+re-scoring model in 8-bit integers made complete answers 6.3 times faster and
+first words 5.3 times faster on the same hardware, while keeping 95\,\% of the
+passages the model reads. A model half the size started 2.1 times sooner but
+misattributed facts in 85\,\% of answers to one question, so the larger model
+remained.
 \end{abstract}
 
 \begin{IEEEkeywords}
