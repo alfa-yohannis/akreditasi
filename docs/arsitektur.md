@@ -126,6 +126,27 @@ metode tidak mendominasi hasil gabungan. Dokumen yang muncul di kedua daftar
 naik di atas dokumen yang hanya disukai satu metode — persis perilaku yang
 diinginkan.
 
+### Mengapa setiap potongan tabel Word membawa judul dan kepala kolomnya?
+
+Tabel panjang, misalnya Tabel 3.C.2 Publikasi Penelitian di LKPS, terpotong
+menjadi puluhan potongan. Tanpa konteks, satu baris seperti
+`<nama dosen> | <judul> | IB | | | V` tidak memuat kata "publikasi" maupun arti
+kolomnya, sehingga tidak ditemukan oleh pertanyaan tentang publikasi.
+`WordExtractor` karena itu membaca dokumen sesuai urutannya: setiap tabel
+menjadi bagian tersendiri berlabel judulnya ("Tabel 3.C.2 Publikasi
+Penelitian"), dan judul beserta baris kepala kolomnya diulang di awal setiap
+potongan tabel itu. Revisi ekstraksi `.docx` tercatat di tanda tangan berkas
+(`SourceDocument.EXTRACTION_REVISIONS`), sehingga indexing berikutnya membaca
+ulang semua `.docx` sekali saja, tanpa mengulang OCR berkas PDF.
+
+### Mengapa salinan dokumen tidak mengisi dua tempat?
+
+Arsip menyimpan beberapa versi satu dokumen (final, draf, referensi), sehingga
+potongan terbaik untuk satu pertanyaan sering kali teks yang sama dari beberapa
+berkas; pada tabel publikasi LKPS, keenamnya. Setelah reranking, potongan yang
+sama atau hampir sama (≥ 90 % kata yang sama) dengan potongan yang sudah
+terpilih dilewati, sehingga tempatnya diisi potongan lain.
+
 ### Mengapa hanya model penjawab yang ada di GPU?
 
 Anggaran VRAM pada RTX 4060 (8 GB), diukur (`evaluation_results/`):

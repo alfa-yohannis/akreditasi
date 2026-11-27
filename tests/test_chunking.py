@@ -142,6 +142,39 @@ class TestChunkOverlap:
         assert combined_word_count == 25
 
 
+class TestSectionContext:
+    """A table's caption and header row heading every chunk cut from it."""
+
+    @pytest.fixture
+    def table_section(self):
+        """A table of 12 rows of 6 words, with a 6-word caption and header."""
+        rows = "\n\n".join(f"dosen{index} | judul{index} | jurnal | S5 | 2025 | V" for index in range(12))
+        return ExtractedSection(
+            ordinal=2,
+            label="Tabel 3.B.2 Publikasi Ilmiah",
+            text=rows,
+            context="Tabel 3.B.2 Publikasi Ilmiah\nNama | Judul | Media",
+        )
+
+    def test_every_chunk_starts_with_the_context(self, word_chunker, table_section):
+        chunks = word_chunker.chunk_sections("doc-1", [table_section])
+        assert len(chunks) > 1
+        assert all(chunk.text.startswith("Tabel 3.B.2 Publikasi Ilmiah\nNama | Judul | Media\n\n") for chunk in chunks)
+
+    def test_context_counts_against_the_token_budget(self, word_chunker, table_section):
+        chunks = word_chunker.chunk_sections("doc-1", [table_section])
+        assert all(chunk.token_count <= 20 for chunk in chunks)
+
+    def test_every_row_still_reaches_a_chunk(self, word_chunker, table_section):
+        chunks = word_chunker.chunk_sections("doc-1", [table_section])
+        text = "\n".join(chunk.text for chunk in chunks)
+        assert all(f"dosen{index} |" in text for index in range(12))
+
+    def test_a_section_without_context_is_unchanged(self, word_chunker):
+        section = ExtractedSection(ordinal=1, label="Halaman 1", text="satu dua tiga empat lima")
+        assert word_chunker.chunk_sections("doc-1", [section])[0].text == "satu dua tiga empat lima"
+
+
 class TestOversizedContent:
     """Content that cannot be split on paragraph boundaries."""
 

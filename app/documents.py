@@ -42,10 +42,22 @@ class SourceDocument:
         digest = hashlib.sha1(self.relative_path.encode("utf-8", "replace"))
         return digest.hexdigest()[:16]
 
+    #: Raised when an extractor changes what it produces for one format, so the
+    #: next incremental run re-reads every file of that format once -- and only
+    #: those files: scanned PDFs are not OCR'd again because Word changed.
+    #: .docx 2: tables kept in reading order, each with its caption and header.
+    EXTRACTION_REVISIONS = {".docx": 2}
+
     @property
     def content_signature(self) -> str:
-        """Cheap change detector combining file size and modification time."""
-        return f"{self.size_bytes}:{int(self.modified_timestamp)}"
+        """Cheap change detector combining file size and modification time.
+
+        Formats listed in :attr:`EXTRACTION_REVISIONS` also carry their
+        extractor's revision.
+        """
+        signature = f"{self.size_bytes}:{int(self.modified_timestamp)}"
+        revision = self.EXTRACTION_REVISIONS.get(self.extension)
+        return f"{signature}:r{revision}" if revision else signature
 
     @property
     def top_level_folder(self) -> str:
@@ -78,6 +90,10 @@ class ExtractedSection:
     text: str
     #: True when the text came from OCR rather than an embedded text layer.
     produced_by_ocr: bool = False
+    #: Repeated at the top of every chunk cut from this section -- a table's
+    #: caption and header row -- so a chunk from the middle of a long table
+    #: still says what it lists and what its columns mean.
+    context: str = ""
 
     @property
     def character_count(self) -> int:

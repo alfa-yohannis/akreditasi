@@ -222,7 +222,119 @@ class TestWordExtractor:
         outcome = WordExtractor(isolated_settings, guard).extract(
             describe_file(word_path, isolated_settings.source_directory)
         )
-        assert "Gufron | Lektor" in outcome.sections[0].text
+        assert "Gufron | Lektor" in outcome.sections[1].text
+
+    def extract(self, isolated_settings, guard, build) -> list:
+        """Save the document ``build`` fills in, and return its sections."""
+        import docx
+
+        document = docx.Document()
+        build(document)
+        target = isolated_settings.source_directory / "lkps.docx"
+        document.save(target)
+        outcome = WordExtractor(isolated_settings, guard).extract(
+            describe_file(target, isolated_settings.source_directory)
+        )
+        assert outcome.succeeded
+        return outcome.sections
+
+    @staticmethod
+    def add_table(document, rows: list[list[str]]):
+        """Append a table holding ``rows``."""
+        table = document.add_table(rows=len(rows), cols=len(rows[0]))
+        for row_index, cells in enumerate(rows):
+            for column_index, text in enumerate(cells):
+                table.cell(row_index, column_index).text = text
+        return table
+
+    PUBLICATIONS = [
+        ["Nama Dosen", "Judul Publikasi", "Tahun"],
+        ["Dosen A", "Judul Publikasi Pertama", "2025"],
+        ["Dosen B", "Judul Publikasi Kedua", "2024"],
+    ]
+
+    def test_tables_stay_in_reading_order(self, isolated_settings, guard):
+        def build(document):
+            document.add_paragraph("Bagian tiga membahas penelitian dosen.")
+            document.add_paragraph("Tabel 3.B.2 Publikasi Ilmiah DTPR")
+            self.add_table(document, self.PUBLICATIONS)
+            document.add_paragraph("Bagian empat membahas pengabdian kepada masyarakat.")
+
+        sections = self.extract(isolated_settings, guard, build)
+        assert [section.label for section in sections] == [
+            "Dokumen", "Tabel 3.B.2 Publikasi Ilmiah DTPR", "Dokumen"
+        ]
+        assert "penelitian dosen" in sections[0].text
+        assert "Dosen A | Judul Publikasi Pertama | 2025" in sections[1].text
+        assert "pengabdian" in sections[2].text
+
+    def test_caption_and_header_row_become_the_context(self, isolated_settings, guard):
+        def build(document):
+            document.add_paragraph("Tabel 3.B.2 Publikasi Ilmiah DTPR")
+            self.add_table(document, self.PUBLICATIONS)
+
+        table_section = self.extract(isolated_settings, guard, build)[1]
+        assert table_section.context == (
+            "Tabel 3.B.2 Publikasi Ilmiah DTPR\nNama Dosen | Judul Publikasi | Tahun"
+        )
+        assert "Nama Dosen" not in table_section.text
+
+    def test_a_note_between_caption_and_table_is_skipped(self, isolated_settings, guard):
+        def build(document):
+            document.add_paragraph("Tabel 3.A.2 Penelitian DTPR")
+            document.add_paragraph("(dalam juta rupiah)")
+            self.add_table(document, self.PUBLICATIONS)
+
+        assert self.extract(isolated_settings, guard, build)[1].label == "Tabel 3.A.2 Penelitian DTPR"
+
+    def test_a_heading_before_the_table_serves_as_its_caption(self, isolated_settings, guard):
+        def build(document):
+            document.add_heading("Publikasi Ilmiah Dosen", level=2)
+            self.add_table(document, self.PUBLICATIONS)
+
+        assert self.extract(isolated_settings, guard, build)[1].label == "Publikasi Ilmiah Dosen"
+
+    def test_a_sentence_before_the_table_is_not_a_caption(self, isolated_settings, guard):
+        def build(document):
+            document.add_paragraph("Data berikut diambil dari SISTER.")
+            self.add_table(document, self.PUBLICATIONS)
+
+        table_section = self.extract(isolated_settings, guard, build)[1]
+        assert table_section.label == "Tabel 1"
+        assert table_section.context == "Nama Dosen | Judul Publikasi | Tahun"
+
+    def test_a_title_row_spanning_the_table_names_it(self, isolated_settings, guard):
+        def build(document):
+            table = self.add_table(document, [["", "", ""]] + self.PUBLICATIONS)
+            title = table.cell(0, 0).merge(table.cell(0, 2))
+            title.text = "Publikasi Ilmiah DTPR"
+
+        table_section = self.extract(isolated_settings, guard, build)[0]
+        assert table_section.label == "Publikasi Ilmiah DTPR"
+        assert table_section.context == (
+            "Publikasi Ilmiah DTPR\nNama Dosen | Judul Publikasi | Tahun"
+        )
+
+    def test_a_grouped_header_keeps_both_header_rows(self, isolated_settings, guard):
+        def build(document):
+            table = self.add_table(document, [
+                ["Nama", "Jumlah Judul", ""],
+                ["", "TS-1", "TS"],
+                ["Dosen A", "2", "3"],
+            ])
+            table.cell(0, 1).merge(table.cell(0, 2)).text = "Jumlah Judul"
+
+        table_section = self.extract(isolated_settings, guard, build)[0]
+        assert table_section.context == "Nama | Jumlah Judul | Jumlah Judul\n | TS-1 | TS"
+        assert table_section.text == "Dosen A | 2 | 3"
+
+    def test_a_one_row_table_keeps_its_row_as_text(self, isolated_settings, guard):
+        def build(document):
+            self.add_table(document, [["Ketua Program Studi", "Dosen A"]])
+
+        table_section = self.extract(isolated_settings, guard, build)[0]
+        assert table_section.text == "Ketua Program Studi | Dosen A"
+        assert table_section.context == ""
 
 
 class TestExtractorRegistry:

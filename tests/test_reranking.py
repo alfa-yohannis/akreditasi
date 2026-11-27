@@ -151,12 +151,63 @@ class TestScoringOnlyWhatIsNeeded:
 
         assert model.sent == ["pendek", "sedang saja", "teks yang paling panjang di sini"]
 
-    def test_duplicates_share_their_text_score_and_order_is_kept(self, isolated_settings):
+    def test_duplicates_share_their_text_score(self, isolated_settings):
         reranker = self.make_reranker(isolated_settings, RecordingModel())
+        passages = [make_passage(1, "sedang saja"), make_passage(2, "teks yang paling panjang"),
+                    make_passage(3, "pendek"), make_passage(4, "teks yang paling panjang")]
+
+        reranker.rerank("pertanyaan", passages, keep_count=3)
+
+        assert passages[0].reranked_score == passages[1].reranked_score == len("teks yang paling panjang")
+
+
+class TestKeepingDistinctPassages:
+    """Copies of one passage, from several versions of a document, take one place."""
+
+    ROW = "Tabel 3.C.2 Publikasi Penelitian | No | Nama DTPR | Judul Publikasi | {} | IB | V"
+
+    def make_reranker(self, isolated_settings):
+        reranker = CrossEncoderReranker(isolated_settings)
+        reranker._model = RecordingModel()
+        reranker._load_attempted = True
+        return reranker
+
+    def test_an_exact_copy_is_passed_over_for_the_next_passage(self, isolated_settings):
+        reranker = self.make_reranker(isolated_settings)
         passages = [make_passage(1, "sedang saja"), make_passage(2, "teks yang paling panjang"),
                     make_passage(3, "pendek"), make_passage(4, "teks yang paling panjang")]
 
         kept = reranker.rerank("pertanyaan", passages, keep_count=3)
 
-        assert [p.chunk_id for p in kept] == [2, 4, 1]
-        assert kept[0].reranked_score == kept[1].reranked_score == len("teks yang paling panjang")
+        assert [p.chunk_id for p in kept] == [2, 1, 3]
+
+    def test_of_two_copies_the_better_fused_one_is_kept(self, isolated_settings):
+        reranker = self.make_reranker(isolated_settings)
+        passages = [make_passage(7, "salinan yang sama"), make_passage(3, "salinan yang sama")]
+
+        assert [p.chunk_id for p in reranker.rerank("pertanyaan", passages, keep_count=2)] == [7]
+
+    def test_a_near_copy_is_passed_over(self, isolated_settings):
+        reranker = self.make_reranker(isolated_settings)
+        words = " ".join(f"kata{index}" for index in range(30))
+        passages = [make_passage(1, words + " versi final"), make_passage(2, words + " versi drafnya")]
+
+        # The stand-in model scores the longer draft higher; only that one stays.
+        assert [p.chunk_id for p in reranker.rerank("pertanyaan", passages, keep_count=2)] == [2]
+
+    def test_different_rows_of_one_table_are_all_kept(self, isolated_settings):
+        reranker = self.make_reranker(isolated_settings)
+        passages = [
+            make_passage(1, self.ROW.format("Analisis Sentimen Ulasan Aplikasi Seluler")),
+            make_passage(2, self.ROW.format("Sistem Rekomendasi Mata Kuliah Pilihan")),
+        ]
+
+        assert len(reranker.rerank("pertanyaan", passages, keep_count=2)) == 2
+
+    def test_copies_are_dropped_without_a_model_too(self, isolated_settings):
+        isolated_settings.reranking_enabled = False
+        reranker = CrossEncoderReranker(isolated_settings)
+        passages = [make_passage(1, "isi yang sama"), make_passage(2, "isi yang sama"),
+                    make_passage(3, "isi lain")]
+
+        assert [p.chunk_id for p in reranker.rerank("pertanyaan", passages, keep_count=2)] == [1, 3]

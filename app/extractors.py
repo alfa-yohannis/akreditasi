@@ -165,7 +165,24 @@ class PdfExtractor(DocumentExtractor):
 
 
 class WordExtractor(DocumentExtractor):
-    """Extracts paragraphs and tables from a Word document as one section."""
+    """Extracts a Word document in reading order, each table as its own section.
+
+    Prose between tables becomes a "Dokumen" section. A table becomes a section
+    labelled with its caption ("Tabel 3.B.2 ..."), and its caption and header
+    row travel as the section's context, heading every chunk cut from it. A
+    long table such as the LKPS list of lecturers' publications is cut into
+    many chunks, and without that context a row like "<lecturer> | <title> |
+    S5" says neither "publikasi" nor what its columns are, so search cannot
+    connect it to a question about publications.
+    """
+
+    PROSE_LABEL = "Dokumen"
+    #: A paragraph this short just before a table is read as its caption even
+    #: when it does not start with "Tabel": usually a heading naming the table.
+    CAPTION_MAXIMUM_CHARACTERS = 160
+    #: Citations show the label, so a long caption is shortened there.
+    LABEL_MAXIMUM_CHARACTERS = 100
+    _CAPTION_PREFIX = re.compile(r"^(tabel|table)\b", re.IGNORECASE)
 
     @property
     def supported_extensions(self) -> set[str]:
@@ -173,32 +190,118 @@ class WordExtractor(DocumentExtractor):
         return {".docx"}
 
     def extract_sections(self, document: SourceDocument) -> ExtractionOutcome:
-        """Read body paragraphs first, then flatten every table into rows."""
+        """Walk paragraphs and tables in the order they appear in the document."""
         import docx
+        from docx.table import Table
 
         with self._guard.open_for_reading(document.absolute_path, "rb") as file_handle:
             word_document = docx.Document(io.BytesIO(file_handle.read()))
 
-        lines = [
-            paragraph.text.strip()
-            for paragraph in word_document.paragraphs
-            if paragraph.text.strip()
-        ]
-        for table in word_document.tables:
-            lines.extend(self._flatten_table(table))
+        sections: list[ExtractedSection] = []
+        paragraphs: list[str] = []
+        table_count = 0
+        for block in word_document.iter_inner_content():
+            if not isinstance(block, Table):
+                text = block.text.strip()
+                if text:
+                    paragraphs.append(text)
+                continue
+            table_count += 1
+            caption = self._find_caption(paragraphs)
+            self._add_section(sections, self.PROSE_LABEL, "\n\n".join(paragraphs))
+            paragraphs = []
+            self._add_table(sections, block, caption, table_count)
+        self._add_section(sections, self.PROSE_LABEL, "\n\n".join(paragraphs))
+        return ExtractionOutcome(sections=sections)
 
-        body_text = self._normaliser.normalise("\n".join(lines))
-        section = ExtractedSection(ordinal=1, label="Dokumen", text=body_text)
-        return ExtractionOutcome(sections=[section])
+    def _add_section(
+        self, sections: list[ExtractedSection], label: str, text: str, context: str = ""
+    ) -> None:
+        """Append a section, numbered in reading order, unless it is empty."""
+        text = self._normaliser.normalise(text)
+        if text:
+            sections.append(
+                ExtractedSection(
+                    ordinal=len(sections) + 1,
+                    label=label,
+                    text=text,
+                    context=self._normaliser.normalise(context),
+                )
+            )
 
-    def _flatten_table(self, table) -> list[str]:
-        """Render a Word table as pipe-separated rows so structure survives."""
-        rows: list[str] = []
-        for row in table.rows:
-            cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
-            if any(cells):
-                rows.append(" | ".join(cells))
-        return rows
+    def _find_caption(self, paragraphs: list[str]) -> str:
+        """Return the caption of the table that follows ``paragraphs``, or ''.
+
+        One of the last two paragraphs starting with "Tabel" wins (a note
+        such as "(dalam juta rupiah)" may sit between caption and table).
+        Otherwise a short last paragraph that does not end a sentence -- a
+        heading, or a lead-in ending in a colon -- is taken.
+        """
+        for paragraph in reversed(paragraphs[-2:]):
+            if self._CAPTION_PREFIX.match(paragraph):
+                return paragraph[:300]
+        if not paragraphs:
+            return ""
+        last = paragraphs[-1]
+        if len(last) <= self.CAPTION_MAXIMUM_CHARACTERS and not last.endswith((".", "!", "?", ";", ",")):
+            return last
+        return ""
+
+    def _add_table(
+        self, sections: list[ExtractedSection], table, caption: str, table_number: int
+    ) -> None:
+        """Append ``table`` as a section of rows headed by caption and header."""
+        rows = [row for row in (self._read_row(row) for row in table.rows) if any(row[0])]
+        if not rows:
+            return
+        width = max(len(cells) for cells, _distinct in rows)
+
+        context_lines = [caption] if caption else []
+        first_body_row = 0
+        # A first row that is one cell spanning the whole table is its title.
+        title_cells, title_distinct = rows[0]
+        if len(rows) > 1 and width > 1 and title_distinct == 1:
+            title = title_cells[0]
+            if title and title != caption:
+                context_lines.append(title)
+            caption = caption or title
+            first_body_row = 1
+        # The next row names the columns; when it groups columns under merged
+        # headings, the row below it names the columns inside each group.
+        if width > 1 and len(rows) - first_body_row >= 2:
+            header_cells, header_distinct = rows[first_body_row]
+            context_lines.append(" | ".join(header_cells))
+            first_body_row += 1
+            if header_distinct < len(header_cells) and len(rows) - first_body_row >= 2:
+                context_lines.append(" | ".join(rows[first_body_row][0]))
+                first_body_row += 1
+
+        body = rows[first_body_row:]
+        label = caption[: self.LABEL_MAXIMUM_CHARACTERS] if caption else f"Tabel {table_number}"
+        self._add_section(
+            sections,
+            label,
+            "\n\n".join(" | ".join(cells) for cells, _distinct in body),
+            "\n".join(context_lines),
+        )
+
+    @staticmethod
+    def _read_row(row) -> tuple[list[str], int]:
+        """Return a row's cell texts and how many distinct cells it really has.
+
+        A cell merged across columns is returned once per column it spans, with
+        its text repeated so columns stay aligned with the header; the distinct
+        count tells a grouping header row from an ordinary one.
+        """
+        cells = list(row.cells)
+        texts = [cell.text.strip().replace("\n", " ") for cell in cells]
+        distinct = 0
+        previous = None
+        for cell in cells:
+            if previous is None or cell._tc is not previous._tc:
+                distinct += 1
+            previous = cell
+        return texts, distinct
 
 
 class SpreadsheetExtractor(DocumentExtractor):

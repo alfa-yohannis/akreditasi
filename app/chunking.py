@@ -80,12 +80,21 @@ class TokenAwareChunker:
     def chunk_sections(
         self, document_id: str, sections: list[ExtractedSection]
     ) -> list[TextChunk]:
-        """Convert every section of one document into a flat list of chunks."""
+        """Convert every section of one document into a flat list of chunks.
+
+        A section's ``context`` (a table's caption and header row) heads every
+        chunk cut from it, and its tokens come out of that chunk's budget.
+        """
         chunks: list[TextChunk] = []
         for section in sections:
-            for chunk_text in self._split_section_text(section.text):
-                if len(chunk_text) < self._settings.minimum_chunk_characters:
+            context = section.context.strip()
+            budget = self._settings.chunk_token_count
+            if context:
+                budget = max(budget // 2, budget - self._token_counter.count(context))
+            for body_text in self._split_section_text(section.text, budget):
+                if len(body_text) < self._settings.minimum_chunk_characters:
                     continue
+                chunk_text = f"{context}\n\n{body_text}" if context else body_text
                 chunks.append(
                     TextChunk(
                         document_id=document_id,
@@ -98,13 +107,12 @@ class TokenAwareChunker:
                 )
         return chunks
 
-    def _split_section_text(self, section_text: str) -> list[str]:
-        """Pack one section's blocks into overlapping token-bounded chunks."""
-        blocks = self._build_blocks(section_text)
+    def _split_section_text(self, section_text: str, budget: int) -> list[str]:
+        """Pack one section's blocks into overlapping chunks of ``budget`` tokens."""
+        blocks = self._build_blocks(section_text, budget)
         if not blocks:
             return []
 
-        budget = self._settings.chunk_token_count
         chunks: list[str] = []
         current_blocks: list[str] = []
         current_tokens = 0
@@ -125,9 +133,8 @@ class TokenAwareChunker:
             chunks.append("\n\n".join(current_blocks))
         return [chunk.strip() for chunk in chunks if chunk.strip()]
 
-    def _build_blocks(self, section_text: str) -> list[str]:
-        """Split text into paragraph blocks, subdividing oversized ones."""
-        budget = self._settings.chunk_token_count
+    def _build_blocks(self, section_text: str, budget: int) -> list[str]:
+        """Split text into paragraph blocks, subdividing any over ``budget``."""
         blocks: list[str] = []
         for paragraph in self._PARAGRAPH_BOUNDARY.split(section_text):
             stripped = paragraph.strip()

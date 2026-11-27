@@ -44,6 +44,11 @@ class TestSourceDocument:
         document = SourceDocument(Path("/c/a.pdf"), "a.pdf", "a.pdf", ".pdf", 2048, 1700.9)
         assert document.content_signature == "2048:1700"
 
+    def test_signature_carries_the_extractor_revision_of_its_format(self):
+        """A new Word reader must re-read every .docx once, and nothing else."""
+        word = SourceDocument(Path("/c/a.docx"), "a.docx", "a.docx", ".docx", 2048, 1700.9)
+        assert word.content_signature == "2048:1700:r2"
+
     def test_top_level_folder_is_the_first_path_segment(self):
         document = SourceDocument(
             Path("/c/x.pdf"), "1. Budaya Mutu/sub/x.pdf", "x.pdf", ".pdf", 1, 1.0
