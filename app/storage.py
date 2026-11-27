@@ -456,6 +456,30 @@ class DocumentCatalogue:
             ).fetchall()
         return {int(row["chunk_id"]) for row in rows}
 
+    def fetch_chunks_for_section(self, label_prefix: str) -> dict[int, float]:
+        """Map each chunk of a section labelled ``label_prefix...`` to its file's age.
+
+        Returns ``chunk_id -> modification time of its document``, so a caller
+        can prefer the newest version of a document. Case is ignored, and the
+        prefix must end where a word does, so "Tabel 3.C.2" finds "Tabel 3.C.2
+        Publikasi Penelitian" in every version of the LKPS but not
+        "Tabel 3.C.20".
+        """
+        prefix = label_prefix.lower()
+        pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self._access_lock:
+            rows = self._connection.execute(
+                "SELECT c.chunk_id, c.section_label, d.modified_timestamp FROM chunks c "
+                "JOIN documents d ON d.document_id = c.document_id "
+                "WHERE lower(c.section_label) LIKE ? ESCAPE '\\'",
+                (pattern,),
+            ).fetchall()
+        return {
+            int(row["chunk_id"]): float(row["modified_timestamp"])
+            for row in rows
+            if not row["section_label"][len(prefix) : len(prefix) + 1].isalnum()
+        }
+
     def _row_to_passage(
         self, row: sqlite3.Row, sparse_score: float | None = None
     ) -> RetrievedPassage:

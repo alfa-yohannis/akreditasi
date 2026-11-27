@@ -135,9 +135,24 @@ kolomnya, sehingga tidak ditemukan oleh pertanyaan tentang publikasi.
 `WordExtractor` karena itu membaca dokumen sesuai urutannya: setiap tabel
 menjadi bagian tersendiri berlabel judulnya ("Tabel 3.C.2 Publikasi
 Penelitian"), dan judul beserta baris kepala kolomnya diulang di awal setiap
-potongan tabel itu. Revisi ekstraksi `.docx` tercatat di tanda tangan berkas
-(`SourceDocument.EXTRACTION_REVISIONS`), sehingga indexing berikutnya membaca
-ulang semua `.docx` sekali saja, tanpa mengulang OCR berkas PDF.
+potongan tabel itu. Judul itu *dipindahkan* dari teks sebelum tabel, bukan
+disalin: potongan yang hanya berisi "Tabel 3.C.2 Publikasi Penelitian" lebih
+cocok dengan pertanyaan yang menyebut tabel itu daripada baris-baris tabelnya
+sendiri, dan model lalu menjawab dari judul tanpa data. Revisi ekstraksi
+`.docx` tercatat di tanda tangan berkas (`SourceDocument.EXTRACTION_REVISIONS`),
+sehingga indexing berikutnya membaca ulang semua `.docx` sekali saja, tanpa
+mengulang OCR berkas PDF.
+
+### Mengapa tabel yang disebut nomornya didahulukan?
+
+Cross-encoder menilai baris tabel (`… | … | V`) lebih rendah daripada prosa
+yang memakai kata yang sama, misalnya ringkasan di LED. Bila pertanyaan
+menyebut tabel dengan nomor bertitik ("Tabel 3.C.2", "tabel 2.a.1"), potongan
+tabel berlabel nomor itu mengisi hingga empat dari enam tempat: dari berkas
+yang paling baru diubah lebih dulu (LKPS final, bukan draf berangka lama),
+lalu menurut kedekatan makna. Dua tempat sisanya tetap dipilih reranker.
+Nomor tanpa titik ("Tabel 6") tidak dipakai, karena tabel tanpa judul diberi
+label "Tabel N" menurut urutannya.
 
 ### Mengapa salinan dokumen tidak mengisi dua tempat?
 

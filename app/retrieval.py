@@ -15,11 +15,14 @@ would need re-tuning whenever the corpus changes.
 from __future__ import annotations
 
 import logging
+import re
+
+import numpy as np
 
 from .config import SETTINGS, Settings
 from .documents import RetrievedPassage
 from .embeddings import TextEmbedder
-from .reranking import CrossEncoderReranker
+from .reranking import CrossEncoderReranker, keep_distinct
 from .storage import DOCUMENT_CATALOGUE, VECTOR_INDEX, DocumentCatalogue, VectorIndex
 
 LOGGER = logging.getLogger(__name__)
@@ -116,7 +119,10 @@ class HybridRetriever:
         if allowed_chunk_ids is not None and not allowed_chunk_ids:
             return []
 
-        dense_results = self._search_dense(question, allowed_chunk_ids)
+        question_vector = (
+            self._embedder.encode_question(question) if self._vector_index.size else None
+        )
+        dense_results = self._search_dense(question_vector, allowed_chunk_ids)
         sparse_results = self._catalogue.search_by_keyword(
             question, self._settings.sparse_candidate_count, folder_filter
         )
@@ -126,11 +132,61 @@ class HybridRetriever:
 
         fused_results = self._fusion.fuse([dense_results, sparse_results])
         rerank_input = fused_results[: self._settings.reranking_candidate_count]
-        final_passages = self._reranker.rerank(question, rerank_input, requested_count)
+        reranked = self._reranker.rerank(question, rerank_input, requested_count)
+        named_table_rows = self._passages_of_named_tables(
+            question,
+            question_vector,
+            allowed_chunk_ids,
+            max(1, requested_count - self.RERANKED_PLACES_BESIDE_A_NAMED_TABLE),
+        )
+        final_passages = keep_distinct(named_table_rows + reranked, requested_count)
 
         for citation_index, passage in enumerate(final_passages, start=1):
             passage.citation_number = citation_index
         return final_passages
+
+    #: A table named by its dotted number: "Tabel 3.C.2", "tabel 2.b.5".
+    #: Undotted numbers ("Tabel 6") are left alone: the Word reader labels a
+    #: table without a caption "Tabel N" after its position, which names nothing.
+    _TABLE_REFERENCE = re.compile(r"\btabel\s+([0-9a-z]+(?:\.[0-9a-z]+)+)", re.IGNORECASE)
+    #: Places left to the reranker's choice when a table is named, so the
+    #: answer can still draw on the narrative around the table.
+    RERANKED_PLACES_BESIDE_A_NAMED_TABLE = 2
+
+    def _passages_of_named_tables(
+        self,
+        question: str,
+        question_vector: np.ndarray | None,
+        allowed_chunk_ids: set[int] | None,
+        limit: int,
+    ) -> list[RetrievedPassage]:
+        """Passages of the tables the question names by number, closest first.
+
+        A question such as "Tabel 3.C.2 Publikasi Penelitian" asks for that
+        table, but the cross-encoder ranks pipe-separated table rows below
+        prose using the same words -- a summary in the LED, or a passage that
+        only mentions the table -- so the rows rarely survived reranking.
+        Passages of a table named by its number therefore take the first
+        places. They come from the most recently modified file first -- the
+        archive holds the final LKPS beside drafts with older figures, and an
+        answer should not mix them -- and by meaning within a file; a passage
+        present in several versions counts once.
+        """
+        if question_vector is None:
+            return []
+        modified_by_chunk: dict[int, float] = {}
+        for reference in dict.fromkeys(self._TABLE_REFERENCE.findall(question)):
+            modified_by_chunk.update(self._catalogue.fetch_chunks_for_section(f"Tabel {reference}"))
+        chunk_ids = set(modified_by_chunk)
+        if allowed_chunk_ids is not None:
+            chunk_ids &= allowed_chunk_ids
+        if not chunk_ids:
+            return []
+        scored_ids = self._vector_index.search(question_vector, len(chunk_ids), chunk_ids)
+        scored_ids.sort(key=lambda hit: (-modified_by_chunk[hit[0]], -hit[1]))
+        # Versions of a document repeat passages, so hydrate enough of the
+        # list to find ``limit`` distinct ones.
+        return keep_distinct(self._hydrate(scored_ids[: limit * 12]), limit)
 
     def _resolve_folder_restriction(self, folder_filter: str | None) -> set[int] | None:
         """Translate a folder name into the set of chunk ids it contains."""
@@ -139,16 +195,18 @@ class HybridRetriever:
         return self._catalogue.fetch_chunk_ids_for_folder(folder_filter)
 
     def _search_dense(
-        self, question: str, allowed_chunk_ids: set[int] | None
+        self, question_vector: np.ndarray | None, allowed_chunk_ids: set[int] | None
     ) -> list[RetrievedPassage]:
         """Run vector search and hydrate the hits with their stored text."""
-        if self._vector_index.size == 0:
+        if question_vector is None:
             return []
-
-        question_vector = self._embedder.encode_question(question)
         scored_ids = self._vector_index.search(
             question_vector, self._settings.dense_candidate_count, allowed_chunk_ids
         )
+        return self._hydrate(scored_ids)
+
+    def _hydrate(self, scored_ids: list[tuple[int, float]]) -> list[RetrievedPassage]:
+        """Load the passages behind ``(chunk_id, similarity)`` hits, in order."""
         if not scored_ids:
             return []
 

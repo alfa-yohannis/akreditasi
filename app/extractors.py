@@ -180,6 +180,9 @@ class WordExtractor(DocumentExtractor):
     #: A paragraph this short just before a table is read as its caption even
     #: when it does not start with "Tabel": usually a heading naming the table.
     CAPTION_MAXIMUM_CHARACTERS = 160
+    #: A paragraph starting with "Tabel" longer than this is a sentence about a
+    #: table ("Tabel 3 menunjukkan bahwa ..."), not its caption.
+    CAPTION_TABEL_MAXIMUM_CHARACTERS = 300
     #: Citations show the label, so a long caption is shortened there.
     LABEL_MAXIMUM_CHARACTERS = 100
     _CAPTION_PREFIX = re.compile(r"^(tabel|table)\b", re.IGNORECASE)
@@ -207,10 +210,10 @@ class WordExtractor(DocumentExtractor):
                     paragraphs.append(text)
                 continue
             table_count += 1
-            caption = self._find_caption(paragraphs)
+            caption_lines = self._take_caption(paragraphs)
             self._add_section(sections, self.PROSE_LABEL, "\n\n".join(paragraphs))
             paragraphs = []
-            self._add_table(sections, block, caption, table_count)
+            self._add_table(sections, block, caption_lines, table_count)
         self._add_section(sections, self.PROSE_LABEL, "\n\n".join(paragraphs))
         return ExtractionOutcome(sections=sections)
 
@@ -229,34 +232,52 @@ class WordExtractor(DocumentExtractor):
                 )
             )
 
-    def _find_caption(self, paragraphs: list[str]) -> str:
-        """Return the caption of the table that follows ``paragraphs``, or ''.
+    def _take_caption(self, paragraphs: list[str]) -> list[str]:
+        """Move the caption of the table that follows ``paragraphs`` out of them.
 
-        One of the last two paragraphs starting with "Tabel" wins (a note
-        such as "(dalam juta rupiah)" may sit between caption and table).
-        Otherwise a short last paragraph that does not end a sentence -- a
-        heading, or a lead-in ending in a colon -- is taken.
+        Returns the caption, with any short note between it and the table
+        ("(dalam juta rupiah)"), or [] when there is none. The caption is a
+        last paragraph starting with "Tabel", or one just before a short note;
+        failing that, a short last paragraph that does not end a sentence -- a
+        heading, or a lead-in ending in a colon.
+
+        The caption is removed from the prose, not copied: left there, a
+        passage holding little more than "Tabel 3.C.2 Publikasi Penelitian"
+        matches a question naming the table better than the table's own rows
+        do, and the model answers from a heading with no data under it.
         """
-        for paragraph in reversed(paragraphs[-2:]):
-            if self._CAPTION_PREFIX.match(paragraph):
-                return paragraph[:300]
-        if not paragraphs:
-            return ""
-        last = paragraphs[-1]
-        if len(last) <= self.CAPTION_MAXIMUM_CHARACTERS and not last.endswith((".", "!", "?", ";", ",")):
-            return last
-        return ""
+        def is_caption(paragraph: str) -> bool:
+            return bool(self._CAPTION_PREFIX.match(paragraph)) and len(paragraph) <= self.CAPTION_TABEL_MAXIMUM_CHARACTERS
+
+        def is_short(paragraph: str) -> bool:
+            return len(paragraph) <= self.CAPTION_MAXIMUM_CHARACTERS
+
+        taken: list[str] = []
+        if paragraphs and is_caption(paragraphs[-1]):
+            taken = paragraphs[-1:]
+        elif len(paragraphs) >= 2 and is_caption(paragraphs[-2]) and is_short(paragraphs[-1]):
+            taken = paragraphs[-2:]
+        elif paragraphs and is_short(paragraphs[-1]) and not paragraphs[-1].endswith(
+            (".", "!", "?", ";", ",")
+        ):
+            taken = paragraphs[-1:]
+        del paragraphs[len(paragraphs) - len(taken):]
+        return taken
 
     def _add_table(
-        self, sections: list[ExtractedSection], table, caption: str, table_number: int
+        self, sections: list[ExtractedSection], table, caption_lines: list[str], table_number: int
     ) -> None:
         """Append ``table`` as a section of rows headed by caption and header."""
         rows = [row for row in (self._read_row(row) for row in table.rows) if any(row[0])]
         if not rows:
+            # Nothing to attach the caption to, so it goes back to the prose.
+            if caption_lines:
+                self._add_section(sections, self.PROSE_LABEL, "\n\n".join(caption_lines))
             return
         width = max(len(cells) for cells, _distinct in rows)
 
-        context_lines = [caption] if caption else []
+        caption = caption_lines[0] if caption_lines else ""
+        context_lines = list(caption_lines)
         first_body_row = 0
         # A first row that is one cell spanning the whole table is its title.
         title_cells, title_distinct = rows[0]
@@ -277,6 +298,9 @@ class WordExtractor(DocumentExtractor):
                 first_body_row += 1
 
         body = rows[first_body_row:]
+        # One plain space between words, so a label can be looked up by its
+        # number ("Tabel 3.C.2") whatever spacing the author typed.
+        caption = " ".join(caption.split())
         label = caption[: self.LABEL_MAXIMUM_CHARACTERS] if caption else f"Tabel {table_number}"
         self._add_section(
             sections,

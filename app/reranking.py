@@ -30,6 +30,42 @@ from .embeddings import ComputeDeviceResolver
 
 LOGGER = logging.getLogger(__name__)
 
+#: Two passages sharing at least this share of their distinct words are
+#: copies: the same table or page from two versions of one document.
+NEAR_COPY_WORD_OVERLAP = 0.9
+_WORD = re.compile(r"\w+")
+
+
+def keep_distinct(ranked: list[RetrievedPassage], keep_count: int) -> list[RetrievedPassage]:
+    """Return the first ``keep_count`` passages, skipping copies of earlier ones.
+
+    The archive keeps several versions of a document (final, drafts,
+    references), so the best passages for a question are often one text from
+    several files: on the LKPS publications table, all six. Each copy takes a
+    place another passage could fill and adds nothing for the model, so a
+    passage the same as, or nearly the same as, one already kept is passed
+    over. Fewer than ``keep_count`` come back when there are not that many
+    distinct passages.
+    """
+    kept: list[RetrievedPassage] = []
+    kept_words: list[set[str]] = []
+    for passage in ranked:
+        words = set(_WORD.findall(passage.text.lower()))
+        if any(_is_copy(words, earlier) for earlier in kept_words):
+            continue
+        kept.append(passage)
+        kept_words.append(words)
+        if len(kept) == keep_count:
+            break
+    return kept
+
+
+def _is_copy(words: set[str], other: set[str]) -> bool:
+    """True when two word sets overlap enough to be the same passage."""
+    if not words or not other:
+        return words == other
+    return len(words & other) / len(words | other) >= NEAR_COPY_WORD_OVERLAP
+
 
 class OpenVinoCrossEncoder:
     """The reranking model run by OpenVINO instead of PyTorch.
@@ -194,42 +230,10 @@ class CrossEncoderReranker:
         candidates.sort(key=self._sort_key, reverse=True)
         return self._keep_distinct(candidates, keep_count)
 
-    #: Two passages sharing at least this share of their distinct words are
-    #: copies: the same table or page from two versions of one document.
-    NEAR_COPY_WORD_OVERLAP = 0.9
-    _WORD = re.compile(r"\w+")
-
-    def _keep_distinct(
-        self, ranked: list[RetrievedPassage], keep_count: int
-    ) -> list[RetrievedPassage]:
-        """Return the first ``keep_count`` passages, skipping copies of earlier ones.
-
-        The archive keeps several versions of a document (final, drafts,
-        references), so the best passages for a question are often one text
-        from several files: on the LKPS publications table, all six. Each copy
-        takes a place another passage could fill and adds nothing for the
-        model, so a passage the same as, or nearly the same as, one already
-        kept is passed over. Fewer than ``keep_count`` come back when there
-        are not that many distinct passages.
-        """
-        kept: list[RetrievedPassage] = []
-        kept_words: list[set[str]] = []
-        for passage in ranked:
-            words = set(self._WORD.findall(passage.text.lower()))
-            if any(self._is_copy(words, earlier) for earlier in kept_words):
-                continue
-            kept.append(passage)
-            kept_words.append(words)
-            if len(kept) == keep_count:
-                break
-        return kept
-
-    def _is_copy(self, words: set[str], other: set[str]) -> bool:
-        """True when two word sets overlap enough to be the same passage."""
-        if not words or not other:
-            return words == other
-        overlap = len(words & other) / len(words | other)
-        return overlap >= self.NEAR_COPY_WORD_OVERLAP
+    @staticmethod
+    def _keep_distinct(ranked: list[RetrievedPassage], keep_count: int) -> list[RetrievedPassage]:
+        """The reranker's final pick: see :func:`keep_distinct`."""
+        return keep_distinct(ranked, keep_count)
 
     def _score(self, question: str, texts: list[str]) -> list[float]:
         """Score each passage text against the question, distinct texts once.

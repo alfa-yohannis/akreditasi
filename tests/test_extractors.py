@@ -268,31 +268,63 @@ class TestWordExtractor:
         assert "Dosen A | Judul Publikasi Pertama | 2025" in sections[1].text
         assert "pengabdian" in sections[2].text
 
+    def test_the_caption_leaves_the_prose_before_the_table(self, isolated_settings, guard):
+        """Left in the prose, a caption alone outranks the table's own rows."""
+        def build(document):
+            document.add_paragraph("Bagian tiga membahas penelitian dosen.")
+            document.add_paragraph("Tabel 3.B.2 Publikasi Ilmiah DTPR")
+            self.add_table(document, self.PUBLICATIONS)
+
+        prose = self.extract(isolated_settings, guard, build)[0]
+        assert prose.text == "Bagian tiga membahas penelitian dosen."
+
     def test_caption_and_header_row_become_the_context(self, isolated_settings, guard):
         def build(document):
             document.add_paragraph("Tabel 3.B.2 Publikasi Ilmiah DTPR")
             self.add_table(document, self.PUBLICATIONS)
 
-        table_section = self.extract(isolated_settings, guard, build)[1]
-        assert table_section.context == (
+        sections = self.extract(isolated_settings, guard, build)
+        assert len(sections) == 1
+        assert sections[0].context == (
             "Tabel 3.B.2 Publikasi Ilmiah DTPR\nNama Dosen | Judul Publikasi | Tahun"
         )
-        assert "Nama Dosen" not in table_section.text
+        assert "Nama Dosen" not in sections[0].text
 
-    def test_a_note_between_caption_and_table_is_skipped(self, isolated_settings, guard):
+    def test_a_note_between_caption_and_table_goes_with_the_caption(self, isolated_settings, guard):
         def build(document):
             document.add_paragraph("Tabel 3.A.2 Penelitian DTPR")
             document.add_paragraph("(dalam juta rupiah)")
             self.add_table(document, self.PUBLICATIONS)
 
-        assert self.extract(isolated_settings, guard, build)[1].label == "Tabel 3.A.2 Penelitian DTPR"
+        table_section = self.extract(isolated_settings, guard, build)[0]
+        assert table_section.label == "Tabel 3.A.2 Penelitian DTPR"
+        assert table_section.context.startswith("Tabel 3.A.2 Penelitian DTPR\n(dalam juta rupiah)\n")
+
+    def test_a_sentence_about_a_table_is_not_its_caption(self, isolated_settings, guard):
+        sentence = "Tabel 3 menunjukkan " + "bahwa capaian penelitian meningkat setiap tahun " * 8 + "."
+
+        def build(document):
+            document.add_paragraph(sentence)
+            self.add_table(document, self.PUBLICATIONS)
+
+        sections = self.extract(isolated_settings, guard, build)
+        assert sections[0].text.startswith("Tabel 3 menunjukkan")
+        assert sections[1].label == "Tabel 1"
 
     def test_a_heading_before_the_table_serves_as_its_caption(self, isolated_settings, guard):
         def build(document):
             document.add_heading("Publikasi Ilmiah Dosen", level=2)
             self.add_table(document, self.PUBLICATIONS)
 
-        assert self.extract(isolated_settings, guard, build)[1].label == "Publikasi Ilmiah Dosen"
+        assert self.extract(isolated_settings, guard, build)[0].label == "Publikasi Ilmiah Dosen"
+
+    def test_the_caption_of_an_empty_table_stays_in_the_text(self, isolated_settings, guard):
+        def build(document):
+            document.add_paragraph("Tabel 9 Rencana Kegiatan")
+            document.add_table(rows=2, cols=2)
+
+        sections = self.extract(isolated_settings, guard, build)
+        assert [section.text for section in sections] == ["Tabel 9 Rencana Kegiatan"]
 
     def test_a_sentence_before_the_table_is_not_a_caption(self, isolated_settings, guard):
         def build(document):

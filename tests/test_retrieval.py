@@ -47,7 +47,7 @@ class TestSourceDocument:
     def test_signature_carries_the_extractor_revision_of_its_format(self):
         """A new Word reader must re-read every .docx once, and nothing else."""
         word = SourceDocument(Path("/c/a.docx"), "a.docx", "a.docx", ".docx", 2048, 1700.9)
-        assert word.content_signature == "2048:1700:r2"
+        assert word.content_signature == "2048:1700:r3"
 
     def test_top_level_folder_is_the_first_path_segment(self):
         document = SourceDocument(
@@ -312,3 +312,95 @@ class TestMultipleCorpusRoots:
         isolated_settings.source_directory = isolated_settings.source_directory / "hilang"
         with pytest.raises(FileNotFoundError):
             scanner.scan()
+
+
+class FixedQuestionEmbedder:
+    """Embeds every question as the same vector, so the stored vectors decide."""
+
+    def encode_question(self, question: str):
+        import numpy as np
+
+        return np.array([1, 0, 0, 0], dtype=np.float32)
+
+
+PUBLICATIONS_TABLE = "Tabel 3.C.2 Publikasi Penelitian"
+
+
+class TestNamedTables:
+    """A question naming a table by number gets that table's rows first."""
+
+    TABLE = PUBLICATIONS_TABLE
+    ROWS = [
+        f"{PUBLICATIONS_TABLE}\nNo | Nama DTPR | Judul Publikasi\n\n"
+        f"{number} | Dosen {number} | Judul nomor {number} tentang topik {topic}"
+        for number, topic in ((1, "jaringan"), (2, "basis data"), (3, "keamanan"))
+    ]
+
+    @pytest.fixture
+    def retriever(self, isolated_settings, guard):
+        import numpy as np
+
+        from app.documents import TextChunk
+        from app.reranking import CrossEncoderReranker
+        from app.retrieval import HybridRetriever
+        from app.storage import DocumentCatalogue, VectorIndex
+
+        isolated_settings.embedding_dimensions = 4
+        isolated_settings.reranking_enabled = False
+        catalogue = DocumentCatalogue(isolated_settings, guard)
+        vectors = VectorIndex(isolated_settings, guard)
+
+        def store(
+            path: str, chunks: list[tuple[str, str]], similarity: float, modified: float = 1.0
+        ) -> None:
+            document = SourceDocument(Path("/corpus") / path, path, Path(path).name, ".docx", 100, modified)
+            rows = [
+                TextChunk(document.document_id, index, label, text, len(text.split()))
+                for index, (label, text) in enumerate(chunks)
+            ]
+            chunk_ids = catalogue.save_document(
+                document, rows, section_count=len(rows), character_count=100,
+                scanned_section_count=0, ocr_section_count=0, status="indexed",
+            )
+            # Lower similarity for later rows, so their order is known.
+            matrix = np.array(
+                [[similarity - 0.01 * index, 1 - similarity, 0, 0] for index in range(len(rows))],
+                dtype=np.float32,
+            )
+            vectors.add(chunk_ids, matrix / np.linalg.norm(matrix, axis=1, keepdims=True))
+
+        # The narrative mentioning the table is closest by meaning of all.
+        store("LED.docx", [("Dokumen", f"Rincian publikasi dosen ada pada {self.TABLE}.")] * 1, 0.99)
+        # The draft is the closer by meaning; the final is the newer file.
+        store("LKPS draf.docx", [(self.TABLE, row + " (draf)") for row in self.ROWS], 0.7, modified=1.0)
+        store("LKPS final.docx", [(self.TABLE, row) for row in self.ROWS], 0.6, modified=2.0)
+        store("Lain.docx", [("Tabel 3.C.20 Lain", "Tabel 3.C.20 Lain\n\nbaris tabel lain sama sekali")], 0.95)
+        yield HybridRetriever(isolated_settings, catalogue, vectors, FixedQuestionEmbedder(),
+                              CrossEncoderReranker(isolated_settings))
+        catalogue.close()
+
+    def test_the_named_table_takes_the_first_places(self, retriever):
+        passages = retriever.retrieve("Tabel 3.C.2 Publikasi Penelitian")
+        assert [p.section_label for p in passages[:3]] == [self.TABLE] * 3
+
+    def test_each_row_appears_once_across_versions_of_the_document(self, retriever):
+        passages = retriever.retrieve("Tabel 3.C.2 Publikasi Penelitian")
+        rows = [p.text for p in passages if p.section_label == self.TABLE]
+        assert sorted(rows) == sorted(self.ROWS)
+
+    def test_rows_come_from_the_newest_version_first(self, retriever):
+        passages = retriever.retrieve("Tabel 3.C.2 Publikasi Penelitian")
+        assert {p.document_name for p in passages[:3]} == {"LKPS final.docx"}
+
+    def test_other_places_are_still_filled_by_ranking(self, retriever):
+        passages = retriever.retrieve("tabel 3.c.2 publikasi")
+        assert {p.document_name for p in passages[3:]} >= {"LED.docx"}
+        assert [p.citation_number for p in passages] == list(range(1, len(passages) + 1))
+
+    def test_a_longer_number_is_a_different_table(self, retriever):
+        passages = retriever.retrieve("Tabel 3.C.2 Publikasi Penelitian")
+        assert passages[0].section_label != "Tabel 3.C.20 Lain"
+
+    def test_without_a_table_number_ranking_decides(self, retriever):
+        passages = retriever.retrieve("publikasi penelitian dosen")
+        assert passages[0].document_name == "LED.docx"

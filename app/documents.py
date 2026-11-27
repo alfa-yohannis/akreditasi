@@ -46,7 +46,8 @@ class SourceDocument:
     #: next incremental run re-reads every file of that format once -- and only
     #: those files: scanned PDFs are not OCR'd again because Word changed.
     #: .docx 2: tables kept in reading order, each with its caption and header.
-    EXTRACTION_REVISIONS = {".docx": 2}
+    #: .docx 3: the caption moves to its table instead of staying in the prose.
+    EXTRACTION_REVISIONS = {".docx": 3}
 
     @property
     def content_signature(self) -> str:

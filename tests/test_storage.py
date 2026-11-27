@@ -267,6 +267,40 @@ class TestCatalogueSearching:
         assert populated_catalogue.find_document_path("tidak-ada") is None
 
 
+class TestChunksBySectionLabel:
+    """Finding a table's chunks by the number its label starts with."""
+
+    @pytest.fixture
+    def labelled_catalogue(self, catalogue):
+        document = build_document("LKPS.docx")
+        labels = ["Tabel 3.C.2 Publikasi Penelitian", "Tabel 3.C.20 Lainnya",
+                  "Tabel 3.C.2. Dengan Titik", "Dokumen", "Tabel 3_C_2 Tiruan"]
+        chunks = [
+            TextChunk(document.document_id, index, label, f"isi {index}", 2)
+            for index, label in enumerate(labels)
+        ]
+        ids = catalogue.save_document(
+            document, chunks, section_count=5, character_count=25,
+            scanned_section_count=0, ocr_section_count=0, status="indexed",
+        )
+        return catalogue, dict(zip(labels, ids))
+
+    def test_finds_the_table_and_ignores_case(self, labelled_catalogue):
+        catalogue, ids = labelled_catalogue
+        assert set(catalogue.fetch_chunks_for_section("tabel 3.c.2")) == {
+            ids["Tabel 3.C.2 Publikasi Penelitian"], ids["Tabel 3.C.2. Dengan Titik"]
+        }
+
+    def test_a_longer_number_is_another_table(self, labelled_catalogue):
+        catalogue, ids = labelled_catalogue
+        assert ids["Tabel 3.C.20 Lainnya"] not in catalogue.fetch_chunks_for_section("Tabel 3.C.2")
+
+    def test_like_wildcards_in_the_prefix_are_literal(self, labelled_catalogue):
+        """In SQL LIKE "_" matches any character; here it must match only "_"."""
+        catalogue, ids = labelled_catalogue
+        assert set(catalogue.fetch_chunks_for_section("Tabel 3_C_2")) == {ids["Tabel 3_C_2 Tiruan"]}
+
+
 class TestVectorIndex:
     """The NumPy-backed dense index."""
 
